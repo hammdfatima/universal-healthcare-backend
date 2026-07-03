@@ -1,0 +1,37 @@
+# Render Blueprint for Universal Healthcare API
+# Docs: https://render.com/docs/blueprint-spec
+#
+# Stripe webhook (add in Stripe Dashboard after deploy):
+#   URL: https://<this-service>.onrender.com/api/v1/subscriptions/webhook
+#   Events: checkout.session.completed, customer.subscription.updated,
+#           customer.subscription.deleted, invoice.payment_failed
+
+services:
+  - type: web
+    name: universal-healthcare-api
+    runtime: bun
+    plan: free
+    buildCommand: bun install && bun run build
+    startCommand: bun run start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false

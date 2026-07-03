@@ -1,0 +1,123 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+generator zod {
+  provider = "prisma-zod-generator"
+  output   = "../src/zod"
+  config   = "../zod.config.json"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum OtpPurpose {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+enum BillingCycle {
+  monthly
+  yearly
+}
+
+enum SubscriptionStatus {
+  active
+  cancelled
+  inactive
+  past_due
+  trialing
+  incomplete
+}
+
+model SubscriptionPlan {
+  id              String             @id @default(cuid())
+  planName        String
+  price           String
+  billingCycle    BillingCycle       @default(monthly)
+  features        String[]
+  stripeProductId String?            @unique
+  stripePriceId   String?            @unique
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  subscriptions   UserSubscription[]
+}
+
+model User {
+  id                  String    @id @default(cuid())
+  email               String    @unique
+  firstName           String?
+  lastName            String?
+  name                String?
+  phone               String?
+  profileImage        String?
+  gender              String?
+  dateOfBirth         DateTime?
+  bloodGroup          String?
+  address             String?
+  onboardingCompleted Boolean   @default(false)
+  isBlocked           Boolean   @default(false)
+  emailNotifications  Boolean   @default(true)
+  marketingEmails     Boolean   @default(false)
+  password            String
+  role                Role      @default(USER)
+  emailVerified       Boolean   @default(false)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  otps                  Otp[]
+  passwordResetTokens   PasswordResetToken[]
+  subscription          UserSubscription?
+}
+
+model UserSubscription {
+  id                   String             @id @default(cuid())
+  userId               String             @unique
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscriptionPlanId   String
+  subscriptionPlan     SubscriptionPlan   @relation(fields: [subscriptionPlanId], references: [id])
+  stripeCustomerId     String?
+  stripeSubscriptionId String?            @unique
+  status               SubscriptionStatus @default(inactive)
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@index([subscriptionPlanId])
+}
+
+model Otp {
+  id         String     @id @default(cuid())
+  userId     String
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code       String
+  purpose    OtpPurpose
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime   @default(now())
+
+  @@index([userId, purpose])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  usedAt    DateTime?
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}

@@ -1,0 +1,36 @@
+{
+  "name": "hono-backend-template",
+  "scripts": {
+    "dev": "bun run --hot src/index.ts",
+    "build": "bun run db:generate",
+    "build:check": "biome lint && bun run typecheck",
+    "start": "bun run db:deploy && bun src/index.ts",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@hono/zod-openapi": "^1.1.0",
+    "@prisma/client": "^6.15.0",
+    "@scalar/hono-api-reference": "^0.9.16",
+    "cloudinary": "^2.10.0",
+    "hono": "^4.9.6",
+    "jsonwebtoken": "^9.0.3",
+    "prisma": "^6.15.0",
+    "stoker": "^2.0.1",
+    "stripe": "^22.3.0",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.2.2",
+    "@types/bun": "latest",
+    "@types/jsonwebtoken": "^9.0.10",
+    "prisma-zod-generator": "^1.18.5"
+  }
+}
