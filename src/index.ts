@@ -7,14 +7,40 @@ import createApp from '~/lib/create-app'
 await parseENV()
 const app = createApp()
 
-const frontendUrl = Bun.env.FRONTEND_URL ?? 'http://localhost:3000'
+function normalizeOrigin(url: string) {
+  return url.replace(/\/$/, '')
+}
+
+function getAllowedOrigins() {
+  const origins = new Set<string>(['http://localhost:3000'])
+
+  if (Bun.env.FRONTEND_URL) {
+    origins.add(normalizeOrigin(Bun.env.FRONTEND_URL))
+  }
+
+  return [...origins]
+}
+
+const allowedOrigins = getAllowedOrigins()
 
 app.get('/health', c => c.json({ status: 'ok' }))
 
 app.use(
   '*',
   cors({
-    origin: frontendUrl,
+    origin: origin => {
+      if (!origin) {
+        return allowedOrigins[0]
+      }
+
+      const normalizedOrigin = normalizeOrigin(origin)
+
+      if (allowedOrigins.includes(normalizedOrigin)) {
+        return origin
+      }
+
+      return allowedOrigins[0]
+    },
     allowHeaders: ['Content-Type', 'Authorization'],
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     exposeHeaders: ['Content-Length'],
