@@ -187,7 +187,7 @@ export async function createSubscriptionCheckoutSession(input: {
   })
 }
 
-export function constructStripeWebhookEvent(payload: string, signature: string) {
+export async function constructStripeWebhookEvent(payload: string, signature: string) {
   const stripe = getStripeClient()
   const webhookSecret = Bun.env.STRIPE_WEBHOOK_SECRET
 
@@ -195,5 +195,5 @@ export function constructStripeWebhookEvent(payload: string, signature: string) 
     throw new HttpError('Stripe webhook is not configured.', 503)
   }
 
-  return stripe.webhooks.constructEvent(payload, signature, webhookSecret)
+  return stripe.webhooks.constructEventAsync(payload, signature, webhookSecret)
 }

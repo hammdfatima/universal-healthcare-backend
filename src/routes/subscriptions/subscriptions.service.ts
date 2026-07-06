@@ -212,7 +212,7 @@ export async function verifyCheckoutSession(userId: string, sessionId: string) {
 }
 
 export async function handleStripeWebhook(payload: string, signature: string) {
-  const event = constructStripeWebhookEvent(payload, signature)
+  const event = await constructStripeWebhookEvent(payload, signature)
 
   switch (event.type) {
     case 'checkout.session.completed': {
@@ -233,6 +233,7 @@ export async function handleStripeWebhook(payload: string, signature: string) {
       break
     }
 
+    case 'customer.subscription.created':
     case 'customer.subscription.updated':
     case 'customer.subscription.deleted': {
       const stripeSubscription = event.data.object as Stripe.Subscription
