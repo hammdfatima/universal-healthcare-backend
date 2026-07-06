@@ -7,10 +7,9 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
 COPY prisma ./prisma
-RUN bun run db:generate
-
 COPY src ./src
 COPY tsconfig.json zod.config.json ./
+RUN bun run db:generate
 
 FROM base AS production
 WORKDIR /app
