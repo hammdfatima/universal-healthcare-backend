@@ -22,6 +22,8 @@ function toAuthUser(user: User) {
     profileImage: user.profileImage,
     role: user.role as UserRole,
     emailVerified: user.emailVerified,
+    mustChangePassword: user.mustChangePassword,
+    isFamilyMemberAccount: Boolean(user.managedByOwnerId),
   }
 }
 
@@ -240,7 +242,10 @@ export async function resetPassword(token: string, password: string) {
   await prisma.$transaction([
     prisma.user.update({
       where: { id: payload.user_id },
-      data: { password: passwordHash },
+      data: {
+        password: passwordHash,
+        mustChangePassword: false,
+      },
     }),
     prisma.passwordResetToken.update({
       where: { id: resetRecord.id },

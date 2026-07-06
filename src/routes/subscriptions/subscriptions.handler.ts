@@ -2,6 +2,8 @@ import * as HttpStatusCodes from 'stoker/http-status-codes'
 import { HttpError } from '~/lib/error'
 import type { SUBSCRIPTION_ROUTES } from '~/routes/subscriptions/subscriptions.routes'
 import {
+  cancelSubscription,
+  changeSubscriptionPlan,
   createCheckoutSession,
   getUserSubscription,
   handleStripeWebhook,
@@ -65,6 +67,48 @@ export const SUBSCRIPTION_ROUTE_HANDLER: HandlerMapFromRoutes<
       {
         success: true,
         message: 'Checkout verified successfully.',
+        data: result,
+      },
+      HttpStatusCodes.OK
+    )
+  },
+
+  cancelSubscription: async c => {
+    const authUser = c.get('user')
+
+    if (!authUser) {
+      throw new HttpError('Unauthorized', 401)
+    }
+
+    const result = await cancelSubscription(authUser.user_id)
+
+    return c.json(
+      {
+        success: true,
+        message: 'Subscription cancellation scheduled successfully.',
+        data: result,
+      },
+      HttpStatusCodes.OK
+    )
+  },
+
+  changePlan: async c => {
+    const authUser = c.get('user')
+
+    if (!authUser) {
+      throw new HttpError('Unauthorized', 401)
+    }
+
+    const { planId } = c.req.valid('json')
+    const result = await changeSubscriptionPlan(authUser.user_id, planId)
+
+    return c.json(
+      {
+        success: true,
+        message:
+          result.mode === 'updated'
+            ? 'Subscription plan updated successfully.'
+            : 'Checkout session created successfully.',
         data: result,
       },
       HttpStatusCodes.OK

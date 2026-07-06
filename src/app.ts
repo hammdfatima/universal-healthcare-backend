@@ -2,6 +2,7 @@ import { API_START_POINT } from '~/config/constants'
 import adminProfileRouter from '~/routes/admin-profile'
 import authRouter from '~/routes/auth'
 import filesRouter from '~/routes/files'
+import familyMembersRouter from '~/routes/family-members'
 import patientProfileRouter from '~/routes/patient-profile'
 import patientSettingsRouter from '~/routes/patient-settings'
 import subscriptionsRouter from '~/routes/subscriptions'
@@ -18,6 +19,7 @@ export function registerRoutes(app: AppOpenAPI) {
     .route(API_START_POINT, adminProfileRouter)
     .route(API_START_POINT, filesRouter)
     .route(API_START_POINT, patientProfileRouter)
+    .route(API_START_POINT, familyMembersRouter)
     .route(API_START_POINT, patientSettingsRouter)
     .route(API_START_POINT, subscriptionsRouter)
     .route('/test', router)

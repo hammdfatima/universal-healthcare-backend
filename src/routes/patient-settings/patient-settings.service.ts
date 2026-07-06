@@ -111,6 +111,9 @@ export async function changePatientPassword(
 
   await prisma.user.update({
     where: { id: userId },
-    data: { password: passwordHash },
+    data: {
+      password: passwordHash,
+      mustChangePassword: false,
+    },
   })
 }

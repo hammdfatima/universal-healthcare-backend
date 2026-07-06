@@ -159,6 +159,8 @@ export async function createSubscriptionCheckoutSession(input: {
   userEmail: string
   planId: string
   stripePriceId: string
+  successUrl?: string
+  cancelUrl?: string
 }) {
   const stripe = getStripeClient()
   const frontendUrl = getFrontendUrl()
@@ -172,8 +174,11 @@ export async function createSubscriptionCheckoutSession(input: {
         quantity: 1,
       },
     ],
-    success_url: `${frontendUrl}/onboarding/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${frontendUrl}/onboarding/subscription?cancelled=true`,
+    success_url:
+      input.successUrl ??
+      `${frontendUrl}/onboarding/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url:
+      input.cancelUrl ?? `${frontendUrl}/onboarding/subscription?cancelled=true`,
     metadata: {
       userId: input.userId,
       planId: input.planId,

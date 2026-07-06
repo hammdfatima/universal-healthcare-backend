@@ -55,6 +55,8 @@ export const authUserSchema = z
     profileImage: z.string().nullable(),
     role: z.enum([USER_ROLES.USER, USER_ROLES.ADMIN]),
     emailVerified: z.boolean(),
+    mustChangePassword: z.boolean(),
+    isFamilyMemberAccount: z.boolean(),
   })
   .openapi('AuthUser')
 

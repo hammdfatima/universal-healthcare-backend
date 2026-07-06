@@ -1,12 +1,21 @@
 import { COMPANY_NAME, DEFAULT_FROM_EMAIL } from '~/config/constants'
+import {
+  renderFamilyMemberWelcomeEmail,
+  renderFamilyMemberWelcomeText,
+  renderPasswordResetEmail,
+  renderPasswordResetText,
+  renderVerificationEmail,
+  renderVerificationText,
+} from '~/lib/email-templates'
 
 type SendEmailInput = {
   to: string
   subject: string
   text: string
+  html: string
 }
 
-export async function sendEmail({ to, subject, text }: SendEmailInput) {
+export async function sendEmail({ to, subject, text, html }: SendEmailInput) {
   const apiKey = Bun.env.RESEND_API_KEY
 
   if (apiKey) {
@@ -21,6 +30,7 @@ export async function sendEmail({ to, subject, text }: SendEmailInput) {
         to: [to],
         subject,
         text,
+        html,
       }),
     })
 
@@ -39,7 +49,8 @@ export async function sendVerificationEmail(email: string, code: string) {
   await sendEmail({
     to: email,
     subject: `${COMPANY_NAME} email verification code`,
-    text: `Your ${COMPANY_NAME} verification code is ${code}. It expires in 10 minutes.`,
+    text: renderVerificationText(code),
+    html: renderVerificationEmail(code),
   })
 }
 
@@ -47,6 +58,22 @@ export async function sendPasswordResetEmail(email: string, code: string) {
   await sendEmail({
     to: email,
     subject: `${COMPANY_NAME} password reset code`,
-    text: `Your ${COMPANY_NAME} password reset code is ${code}. It expires in 10 minutes.`,
+    text: renderPasswordResetText(code),
+    html: renderPasswordResetEmail(code),
+  })
+}
+
+export async function sendFamilyMemberWelcomeEmail(input: {
+  to: string
+  firstName: string
+  loginUrl: string
+  email: string
+  password: string
+}) {
+  await sendEmail({
+    to: input.to,
+    subject: `Your ${COMPANY_NAME} account is ready`,
+    text: renderFamilyMemberWelcomeText(input),
+    html: renderFamilyMemberWelcomeEmail(input),
   })
 }

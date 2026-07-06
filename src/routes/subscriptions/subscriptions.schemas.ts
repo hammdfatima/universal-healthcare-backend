@@ -43,6 +43,23 @@ export const checkoutBodySchema = z
   })
   .openapi('SubscriptionCheckoutBody')
 
+export const changePlanBodySchema = checkoutBodySchema.openapi('ChangePlanBody')
+
+export const changePlanResponseSchema = z
+  .discriminatedUnion('mode', [
+    z.object({
+      mode: z.literal('updated'),
+      subscription: userSubscriptionSchema,
+      isActive: z.boolean(),
+    }),
+    z.object({
+      mode: z.literal('checkout'),
+      checkoutUrl: z.string().url(),
+      sessionId: z.string(),
+    }),
+  ])
+  .openapi('ChangePlanResponse')
+
 export const checkoutSessionSchema = z
   .object({
     checkoutUrl: z.string().url(),
