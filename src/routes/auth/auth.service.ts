@@ -19,6 +19,7 @@ function toAuthUser(user: User) {
     firstName: user.firstName,
     lastName: user.lastName,
     name: user.name,
+    profileImage: user.profileImage,
     role: user.role as UserRole,
     emailVerified: user.emailVerified,
   }

@@ -52,6 +52,7 @@ export const authUserSchema = z
     firstName: z.string().nullable(),
     lastName: z.string().nullable(),
     name: z.string().nullable(),
+    profileImage: z.string().nullable(),
     role: z.enum([USER_ROLES.USER, USER_ROLES.ADMIN]),
     emailVerified: z.boolean(),
   })
