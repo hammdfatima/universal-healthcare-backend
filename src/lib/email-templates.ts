@@ -199,3 +199,105 @@ export function renderVerificationText(code: string) {
 export function renderPasswordResetText(code: string) {
   return `Your ${COMPANY_NAME} password reset code is ${code}. It expires in 10 minutes.`
 }
+
+export function renderSignInEmail(input: {
+  firstName: string
+  formattedTime: string
+  ipAddress?: string | null
+}) {
+  const detailsRows = [
+    renderCredentialRow('Time', input.formattedTime),
+    ...(input.ipAddress ? [renderCredentialRow('IP address', input.ipAddress)] : []),
+  ].join('')
+
+  const bodyHtml = `
+    <p style="margin:0 0 16px;">Hi ${escapeHtml(input.firstName)},</p>
+    <p style="margin:0 0 16px;">
+      Your ${escapeHtml(COMPANY_NAME)} account was signed in successfully.
+    </p>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 16px;">
+      ${detailsRows}
+    </table>
+    <p style="margin:0;font-size:14px;color:${TEXT_MUTED};">
+      If this was not you, change your password immediately and contact
+      <a href="mailto:${DEFAULT_FROM_EMAIL.info}" style="color:${BRAND_GREEN};text-decoration:none;">${DEFAULT_FROM_EMAIL.info}</a>.
+    </p>
+  `
+
+  return renderEmailLayout({
+    title: 'New sign-in to your account',
+    preheader: `A new sign-in to your ${COMPANY_NAME} account was detected.`,
+    bodyHtml,
+  })
+}
+
+export function renderSignInText(input: {
+  firstName: string
+  formattedTime: string
+  ipAddress?: string | null
+}) {
+  return [
+    `Hi ${input.firstName},`,
+    '',
+    `Your ${COMPANY_NAME} account was signed in on ${input.formattedTime}.`,
+    input.ipAddress ? `IP address: ${input.ipAddress}` : '',
+    '',
+    'If this was not you, change your password immediately and contact support.',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+export function renderUserQueryReplyEmail(input: {
+  fullName: string
+  subjectLabel: string
+  originalMessage: string
+  reply: string
+}) {
+  const bodyHtml = `
+    <p style="margin:0 0 16px;">Hi ${escapeHtml(input.fullName)},</p>
+    <p style="margin:0 0 16px;">
+      Thank you for contacting ${escapeHtml(COMPANY_NAME)}. Here is our response to your
+      <strong>${escapeHtml(input.subjectLabel)}</strong> inquiry:
+    </p>
+    <div style="margin:0 0 20px;padding:16px 18px;border-radius:16px;background-color:#fafafa;border:1px solid ${BORDER};">
+      <p style="margin:0 0 8px;font-size:12px;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.08em;">Your message</p>
+      <p style="margin:0;font-size:14px;line-height:1.6;color:#334155;white-space:pre-wrap;">${escapeHtml(input.originalMessage)}</p>
+    </div>
+    <div style="margin:0 0 16px;padding:16px 18px;border-radius:16px;background-color:${BRAND_GREEN_LIGHT};border:1px solid ${BORDER};">
+      <p style="margin:0 0 8px;font-size:12px;color:${TEXT_MUTED};text-transform:uppercase;letter-spacing:0.08em;">Our reply</p>
+      <p style="margin:0;font-size:14px;line-height:1.6;color:#0f172a;white-space:pre-wrap;">${escapeHtml(input.reply)}</p>
+    </div>
+    <p style="margin:0;font-size:14px;color:${TEXT_MUTED};">
+      If you need further assistance, reply to this email or contact us at
+      <a href="mailto:${DEFAULT_FROM_EMAIL.info}" style="color:${BRAND_GREEN};text-decoration:none;">${DEFAULT_FROM_EMAIL.info}</a>.
+    </p>
+  `
+
+  return renderEmailLayout({
+    title: 'Response to your inquiry',
+    preheader: `We replied to your ${input.subjectLabel.toLowerCase()} request.`,
+    bodyHtml,
+  })
+}
+
+export function renderUserQueryReplyText(input: {
+  fullName: string
+  subjectLabel: string
+  originalMessage: string
+  reply: string
+}) {
+  return [
+    `Hi ${input.fullName},`,
+    '',
+    `Thank you for contacting ${COMPANY_NAME}. Here is our response to your ${input.subjectLabel} inquiry:`,
+    '',
+    'Your message:',
+    input.originalMessage,
+    '',
+    'Our reply:',
+    input.reply,
+    '',
+    `If you need further assistance, contact us at ${DEFAULT_FROM_EMAIL.info}.`,
+  ].join('\n')
+}

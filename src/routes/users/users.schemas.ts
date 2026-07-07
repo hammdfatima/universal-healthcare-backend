@@ -3,6 +3,14 @@ import { USER_ROLES } from '~/config/roles'
 
 export const userStatusSchema = z.enum(['active', 'inactive', 'cancelled', 'blocked'])
 
+export const adminUserAddedBySchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    email: z.string().email(),
+  })
+  .openapi('AdminUserAddedBy')
+
 export const adminUserSchema = z
   .object({
     id: z.string(),
@@ -18,6 +26,12 @@ export const adminUserSchema = z
     role: z.enum([USER_ROLES.USER, USER_ROLES.ADMIN]),
     createdAt: z.string(),
     updatedAt: z.string(),
+    isFamilyMemberAccount: z.boolean(),
+    addedBy: adminUserAddedBySchema.nullable(),
+    familyMemberCount: z.number().int().nonnegative(),
+    familyMemberLimit: z.number().int().nonnegative(),
+    canAddFamilyMembers: z.boolean(),
+    familyMembersRemaining: z.number().int().nonnegative(),
   })
   .openapi('AdminUser')
 

@@ -9,6 +9,7 @@ import {
   messageResponseSchema,
   resetPasswordBodySchema,
   resetTokenResponseSchema,
+  sessionResponseSchema,
   signupBodySchema,
   verifyEmailBodySchema,
   verifyResetOtpBodySchema,
@@ -150,6 +151,28 @@ export const AUTH_ROUTES = {
       [HttpStatusCodes.BAD_REQUEST]: jsonContent(
         zodResponseSchema(messageResponseSchema),
         'Invalid or expired reset token'
+      ),
+    },
+  }),
+
+  session: createRoute({
+    method: 'get',
+    tags: ['Auth'],
+    path: '/auth/session',
+    summary: 'Validate current session',
+    description: 'Lightweight check used by clients to detect blocked accounts or revoked sessions.',
+    responses: {
+      [HttpStatusCodes.OK]: jsonContent(
+        zodResponseSchema(sessionResponseSchema),
+        'Session is valid'
+      ),
+      [HttpStatusCodes.UNAUTHORIZED]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Session expired'
+      ),
+      [HttpStatusCodes.FORBIDDEN]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Account blocked'
       ),
     },
   }),

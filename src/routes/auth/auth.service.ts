@@ -2,8 +2,9 @@ import { USER_ROLES, type UserRole } from '~/config/roles'
 import type { User } from '~/generated/prisma'
 import { OtpPurpose } from '~/generated/prisma'
 import { signAccessToken, signPasswordResetToken, verifyPasswordResetToken } from '~/lib/auth'
-import { sendPasswordResetEmail, sendVerificationEmail } from '~/lib/email'
+import { sendPasswordResetEmail, sendSignInEmail, sendVerificationEmail } from '~/lib/email'
 import { HttpError } from '~/lib/error'
+import { notifySignIn } from '~/lib/notifications'
 import { generateOtpCode, getOtpExpiryDate } from '~/lib/otp'
 import { hashPassword, verifyPassword } from '~/lib/password'
 import prisma from '~/lib/prisma'
@@ -11,6 +12,10 @@ import type { IPayload } from '~/types'
 
 const GENERIC_RESET_MESSAGE =
   'If an account exists for this email, a verification code has been sent.'
+
+type SignInContext = {
+  ipAddress?: string | null
+}
 
 function toAuthUser(user: User) {
   return {
@@ -32,6 +37,7 @@ function toTokenPayload(user: User): IPayload {
     user_id: user.id,
     email: user.email,
     role: user.role,
+    tokenVersion: user.tokenVersion,
   }
 }
 
@@ -39,6 +45,56 @@ async function issueAccessToken(user: User) {
   return {
     token: signAccessToken(toTokenPayload(user)),
     user: toAuthUser(user),
+  }
+}
+
+function formatSignInTimestamp(date: Date) {
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  })
+}
+
+function formatSignInMinuteKey(date: Date) {
+  const year = date.getUTCFullYear()
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(date.getUTCDate()).padStart(2, '0')
+  const hour = String(date.getUTCHours()).padStart(2, '0')
+  const minute = String(date.getUTCMinutes()).padStart(2, '0')
+
+  return `${year}${month}${day}${hour}${minute}`
+}
+
+async function recordSuccessfulSignIn(user: User, context?: SignInContext) {
+  if (user.role !== USER_ROLES.USER) {
+    return
+  }
+
+  const signedInAt = new Date()
+  const formattedTime = formatSignInTimestamp(signedInAt)
+  const locationHint = context?.ipAddress ? ` from IP ${context.ipAddress}` : ''
+  const firstName = user.firstName?.trim() || user.name?.split(' ')[0] || 'there'
+
+  try {
+    await Promise.all([
+      notifySignIn(user.id, {
+        formattedTime,
+        locationHint,
+        dedupeKey: `signin:${user.id}:${formatSignInMinuteKey(signedInAt)}`,
+      }),
+      sendSignInEmail({
+        to: user.email,
+        firstName,
+        formattedTime,
+        ipAddress: context?.ipAddress,
+      }),
+    ])
+  } catch (error) {
+    console.error('[auth] Failed to record sign-in notification:', error)
   }
 }
 
@@ -130,7 +186,11 @@ export async function signupUser(input: {
   return user
 }
 
-export async function loginUser(email: string, password: string) {
+export async function loginUser(
+  email: string,
+  password: string,
+  context?: SignInContext
+) {
   const normalizedEmail = email.toLowerCase().trim()
   const user = await prisma.user.findUnique({ where: { email: normalizedEmail } })
 
@@ -149,10 +209,16 @@ export async function loginUser(email: string, password: string) {
     throw new HttpError('Please verify your email before logging in.', 403)
   }
 
+  await recordSuccessfulSignIn(user, context)
+
   return issueAccessToken(user)
 }
 
-export async function verifyEmail(email: string, otp: string) {
+export async function verifyEmail(
+  email: string,
+  otp: string,
+  context?: SignInContext
+) {
   const user = await consumeValidOtp(email.toLowerCase().trim(), otp, OtpPurpose.EMAIL_VERIFICATION)
 
   if (!user) {
@@ -170,6 +236,8 @@ export async function verifyEmail(email: string, otp: string) {
     where: { id: user.id },
     data: { emailVerified: true },
   })
+
+  await recordSuccessfulSignIn(verifiedUser, context)
 
   return issueAccessToken(verifiedUser)
 }

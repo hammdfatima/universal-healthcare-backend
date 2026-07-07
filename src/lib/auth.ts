@@ -7,7 +7,10 @@ if (!JWT_SECRET) {
   console.error('JWT_SECRET is not set in environment variables')
 }
 
-const ONE_DAY_IN_SECONDS = 60 * 60 * 24
+export const ONE_DAY_IN_SECONDS = 60 * 60 * 24
+
+/** Access token lifetime — keep in sync with frontend SESSION_MAX_AGE_MS */
+export const ACCESS_TOKEN_EXPIRY_SECONDS = ONE_DAY_IN_SECONDS
 
 /** OTP email copy + DB otp expiry + reset JWT/expiry must stay aligned */
 export const PASSWORD_RESET_AND_OTP_EXPIRY_MINUTES = 10
@@ -25,7 +28,7 @@ export function signAccessToken(payload: IPayload) {
   }
 
   return sign(payload, JWT_SECRET, {
-    expiresIn: ONE_DAY_IN_SECONDS,
+    expiresIn: ACCESS_TOKEN_EXPIRY_SECONDS,
   })
 }
 

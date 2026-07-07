@@ -12,6 +12,7 @@ router.post('/subscriptions/webhook', stripeWebhookHandler)
 
 router.use('/subscriptions/me', requireAuth)
 router.use('/subscriptions/checkout', requireAuth)
+router.use('/subscriptions/checkout/*', requireAuth)
 router.use('/subscriptions/cancel', requireAuth)
 router.use('/subscriptions/change-plan', requireAuth)
 

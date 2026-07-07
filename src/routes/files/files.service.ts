@@ -19,6 +19,48 @@ const ALLOWED_MIME_TYPES = new Set([
 
 type CloudinaryResourceType = 'image' | 'video' | 'raw' | 'auto'
 
+function getUploadResourceType(file: File): CloudinaryResourceType {
+  const mimeType = file.type.toLowerCase()
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
+
+  if (mimeType === 'application/pdf' || extension === 'pdf') {
+    return 'image'
+  }
+
+  if (
+    mimeType.startsWith('image/') ||
+    ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(extension)
+  ) {
+    return 'image'
+  }
+
+  return 'auto'
+}
+
+function getDetectedMimeType(file: File): string {
+  if (file.type) {
+    return file.type
+  }
+
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
+
+  switch (extension) {
+    case 'pdf':
+      return 'application/pdf'
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg'
+    case 'png':
+      return 'image/png'
+    case 'webp':
+      return 'image/webp'
+    case 'gif':
+      return 'image/gif'
+    default:
+      return ''
+  }
+}
+
 function getUploadFolder(user: IPayload) {
   return user.role === USER_ROLES.ADMIN
     ? `universal-healthcare/admin/${user.user_id}`
@@ -45,7 +87,7 @@ function validateUploadFile(file: File) {
     throw new HttpError('A valid file is required.', 400)
   }
 
-  if (!ALLOWED_MIME_TYPES.has(file.type)) {
+  if (!ALLOWED_MIME_TYPES.has(getDetectedMimeType(file))) {
     throw new HttpError('Unsupported file type. Allowed: JPG, PNG, WEBP, GIF, PDF.', 400)
   }
 
@@ -98,7 +140,7 @@ export async function uploadUserFile(file: File, user: IPayload) {
   const buffer = Buffer.from(await file.arrayBuffer())
   const result = await uploadBuffer(buffer, {
     folder,
-    resource_type: file.type === 'application/pdf' ? 'raw' : 'auto',
+    resource_type: getUploadResourceType(file),
   })
 
   return toUploadedFileResponse(file, result)

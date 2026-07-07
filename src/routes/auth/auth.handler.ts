@@ -12,6 +12,19 @@ import {
 } from '~/routes/auth/auth.service'
 import type { HandlerMapFromRoutes } from '~/types'
 
+function getSignInContext(c: {
+  req: { header: (name: string) => string | undefined }
+}) {
+  const forwardedFor = c.req.header('x-forwarded-for')
+  const ipAddress =
+    forwardedFor?.split(',')[0]?.trim() ||
+    c.req.header('x-real-ip') ||
+    c.req.header('cf-connecting-ip') ||
+    null
+
+  return { ipAddress }
+}
+
 export const AUTH_ROUTE_HANDLER: HandlerMapFromRoutes<typeof AUTH_ROUTES> = {
   signup: async c => {
     const body = c.req.valid('json')
@@ -31,7 +44,7 @@ export const AUTH_ROUTE_HANDLER: HandlerMapFromRoutes<typeof AUTH_ROUTES> = {
 
   login: async c => {
     const body = c.req.valid('json')
-    const result = await loginUser(body.email, body.password)
+    const result = await loginUser(body.email, body.password, getSignInContext(c))
 
     return c.json(
       {
@@ -45,7 +58,7 @@ export const AUTH_ROUTE_HANDLER: HandlerMapFromRoutes<typeof AUTH_ROUTES> = {
 
   verifyEmail: async c => {
     const body = c.req.valid('json')
-    const result = await verifyEmail(body.email, body.otp)
+    const result = await verifyEmail(body.email, body.otp, getSignInContext(c))
 
     return c.json(
       {
@@ -108,6 +121,17 @@ export const AUTH_ROUTE_HANDLER: HandlerMapFromRoutes<typeof AUTH_ROUTES> = {
         success: true,
         message: 'Password updated successfully.',
         data: { message: 'Password updated successfully.' },
+      },
+      HttpStatusCodes.OK
+    )
+  },
+
+  session: async c => {
+    return c.json(
+      {
+        success: true,
+        message: 'Session is valid.',
+        data: { valid: true as const },
       },
       HttpStatusCodes.OK
     )

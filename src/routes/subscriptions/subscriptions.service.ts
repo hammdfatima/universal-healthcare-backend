@@ -8,6 +8,11 @@ import {
   getFrontendUrl,
   getStripeClient,
 } from '~/lib/stripe'
+import {
+  upsertPaymentFromCheckoutSession,
+  upsertPaymentFromStripeInvoice,
+  syncPaymentsForStripeSubscription,
+} from '~/lib/payment-records'
 import type Stripe from 'stripe'
 
 const ACTIVE_STATUSES: SubscriptionStatus[] = ['active', 'trialing']
@@ -221,6 +226,12 @@ async function upsertSubscriptionFromStripe(
     include: { subscriptionPlan: true },
   })
 
+  await syncPaymentsForStripeSubscription(
+    stripeSubscription.id,
+    userId,
+    planId
+  ).catch(() => undefined)
+
   return toSubscriptionResponse(subscription)
 }
 
@@ -229,7 +240,7 @@ export async function verifyCheckoutSession(userId: string, sessionId: string) {
 
   const stripe = getStripeClient()
   const session = await stripe.checkout.sessions.retrieve(sessionId, {
-    expand: ['subscription'],
+    expand: ['subscription', 'payment_intent'],
   })
 
   if (session.metadata?.userId !== userId) {
@@ -257,6 +268,8 @@ export async function verifyCheckoutSession(userId: string, sessionId: string) {
     stripeSubscription
   )
 
+  await upsertPaymentFromCheckoutSession(session)
+
   return {
     subscription,
     isActive: isSubscriptionActive(subscription.status as SubscriptionStatus),
@@ -268,18 +281,23 @@ export async function handleStripeWebhook(payload: string, signature: string) {
 
   switch (event.type) {
     case 'checkout.session.completed': {
-      const session = event.data.object as Stripe.Checkout.Session
+      const stripe = getStripeClient()
+      const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
+        expand: ['subscription', 'payment_intent'],
+      })
       const userId = session.metadata?.userId
       const planId = session.metadata?.planId
+
+      await upsertPaymentFromCheckoutSession(session)
 
       if (!userId || !planId || !session.subscription) {
         break
       }
 
-      const stripe = getStripeClient()
-      const stripeSubscription = await stripe.subscriptions.retrieve(
-        session.subscription as string
-      )
+      const stripeSubscription =
+        typeof session.subscription === 'string'
+          ? await stripe.subscriptions.retrieve(session.subscription)
+          : session.subscription
 
       await upsertSubscriptionFromStripe(userId, planId, stripeSubscription)
       break
@@ -297,6 +315,14 @@ export async function handleStripeWebhook(payload: string, signature: string) {
       }
 
       await upsertSubscriptionFromStripe(userId, planId, stripeSubscription)
+      break
+    }
+
+    case 'invoice.paid':
+    case 'invoice.payment_failed':
+    case 'invoice.updated': {
+      const invoice = event.data.object as Stripe.Invoice
+      await upsertPaymentFromStripeInvoice(invoice)
       break
     }
 

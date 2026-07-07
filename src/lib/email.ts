@@ -4,9 +4,14 @@ import {
   renderFamilyMemberWelcomeText,
   renderPasswordResetEmail,
   renderPasswordResetText,
+  renderSignInEmail,
+  renderSignInText,
+  renderUserQueryReplyEmail,
+  renderUserQueryReplyText,
   renderVerificationEmail,
   renderVerificationText,
 } from '~/lib/email-templates'
+import prisma from '~/lib/prisma'
 
 type SendEmailInput = {
   to: string
@@ -15,7 +20,35 @@ type SendEmailInput = {
   html: string
 }
 
-export async function sendEmail({ to, subject, text, html }: SendEmailInput) {
+type OptionalEmailInput = SendEmailInput & {
+  respectEmailPreferences?: boolean
+}
+
+async function canSendOptionalEmailToRecipient(email: string) {
+  const user = await prisma.user.findUnique({
+    where: { email: email.toLowerCase() },
+    select: { emailNotifications: true },
+  })
+
+  if (!user) {
+    return true
+  }
+
+  return user.emailNotifications
+}
+
+export async function sendEmail({
+  to,
+  subject,
+  text,
+  html,
+  respectEmailPreferences = false,
+}: OptionalEmailInput) {
+  if (respectEmailPreferences && !(await canSendOptionalEmailToRecipient(to))) {
+    console.log(`[email] Skipped for ${to} (email notifications disabled): ${subject}`)
+    return
+  }
+
   const apiKey = Bun.env.RESEND_API_KEY
 
   if (apiKey) {
@@ -63,6 +96,21 @@ export async function sendPasswordResetEmail(email: string, code: string) {
   })
 }
 
+export async function sendSignInEmail(input: {
+  to: string
+  firstName: string
+  formattedTime: string
+  ipAddress?: string | null
+}) {
+  await sendEmail({
+    to: input.to,
+    subject: `New sign-in to your ${COMPANY_NAME} account`,
+    text: renderSignInText(input),
+    html: renderSignInEmail(input),
+    respectEmailPreferences: true,
+  })
+}
+
 export async function sendFamilyMemberWelcomeEmail(input: {
   to: string
   firstName: string
@@ -75,5 +123,22 @@ export async function sendFamilyMemberWelcomeEmail(input: {
     subject: `Your ${COMPANY_NAME} account is ready`,
     text: renderFamilyMemberWelcomeText(input),
     html: renderFamilyMemberWelcomeEmail(input),
+    respectEmailPreferences: true,
+  })
+}
+
+export async function sendUserQueryReplyEmail(input: {
+  to: string
+  fullName: string
+  subjectLabel: string
+  originalMessage: string
+  reply: string
+}) {
+  await sendEmail({
+    to: input.to,
+    subject: `Re: ${input.subjectLabel} — ${COMPANY_NAME}`,
+    text: renderUserQueryReplyText(input),
+    html: renderUserQueryReplyEmail(input),
+    respectEmailPreferences: true,
   })
 }

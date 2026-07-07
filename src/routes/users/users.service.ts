@@ -1,11 +1,30 @@
-import type { User } from '~/generated/prisma'
+import type { SubscriptionStatus, User } from '~/generated/prisma'
 import { USER_ROLES } from '~/config/roles'
 import { HttpError } from '~/lib/error'
+import {
+  getFamilyMemberLimit,
+  getPlanTier,
+  supportsFamilyMembers,
+} from '~/lib/plan-tier'
 import prisma from '~/lib/prisma'
+import { isSubscriptionActive } from '~/routes/subscriptions/subscriptions.service'
 
 type UserStatus = 'active' | 'inactive' | 'cancelled' | 'blocked'
 
-function getDisplayName(user: User): string {
+type AdminUserRecord = User & {
+  subscription: {
+    status: SubscriptionStatus
+    subscriptionPlan: {
+      planName: string
+    }
+  } | null
+  managedByOwner: Pick<User, 'id' | 'email' | 'name' | 'firstName' | 'lastName'> | null
+  _count: {
+    ownedFamilyMembers: number
+  }
+}
+
+function getDisplayName(user: Pick<User, 'name' | 'firstName' | 'lastName' | 'email'>): string {
   if (user.name?.trim()) {
     return user.name.trim()
   }
@@ -31,22 +50,91 @@ function deriveStatus(user: User): UserStatus {
   return 'active'
 }
 
-function toAdminUserResponse(user: User) {
+function buildFamilyMemberInfo(user: AdminUserRecord) {
+  const isFamilyMemberAccount = Boolean(user.managedByOwnerId)
+  const familyMemberCount = user._count.ownedFamilyMembers
+
+  if (isFamilyMemberAccount && user.managedByOwner) {
+    return {
+      isFamilyMemberAccount: true,
+      addedBy: {
+        id: user.managedByOwner.id,
+        name: getDisplayName(user.managedByOwner),
+        email: user.managedByOwner.email,
+      },
+      familyMemberCount: 0,
+      familyMemberLimit: 0,
+      canAddFamilyMembers: false,
+      familyMembersRemaining: 0,
+    }
+  }
+
+  const planName = user.subscription?.subscriptionPlan?.planName ?? null
+  const tier = getPlanTier(planName)
+  const hasActiveSubscription = Boolean(
+    user.subscription && isSubscriptionActive(user.subscription.status)
+  )
+  const familyMemberLimit = hasActiveSubscription ? getFamilyMemberLimit(tier) : 0
+  const canAddFamilyMembers =
+    hasActiveSubscription && supportsFamilyMembers(tier)
+  const familyMembersRemaining = canAddFamilyMembers
+    ? Math.max(0, familyMemberLimit - familyMemberCount)
+    : 0
+
   return {
+    isFamilyMemberAccount: false,
+    addedBy: null,
+    familyMemberCount,
+    familyMemberLimit,
+    canAddFamilyMembers,
+    familyMembersRemaining,
+  }
+}
+
+function toAdminUserResponse(user: AdminUserRecord) {
+  const response = {
     id: user.id,
     name: getDisplayName(user),
     email: user.email,
     firstName: user.firstName,
     lastName: user.lastName,
     profileImage: user.profileImage,
-    plan: null,
+    plan: null as string | null,
     status: deriveStatus(user),
     isBlocked: user.isBlocked,
     emailVerified: user.emailVerified,
     role: user.role,
     createdAt: user.createdAt.toISOString(),
     updatedAt: user.updatedAt.toISOString(),
+    ...buildFamilyMemberInfo(user),
   }
+
+  if (user.isBlocked) {
+    return {
+      ...response,
+      status: 'blocked' as const,
+    }
+  }
+
+  if (
+    user.subscription &&
+    (user.subscription.status === 'active' || user.subscription.status === 'trialing')
+  ) {
+    return {
+      ...response,
+      plan: user.subscription.subscriptionPlan.planName,
+      status: 'active' as const,
+    }
+  }
+
+  if (user.subscription?.status === 'cancelled') {
+    return {
+      ...response,
+      status: 'cancelled' as const,
+    }
+  }
+
+  return response
 }
 
 async function getPatientUserOrThrow(userId: string) {
@@ -63,6 +151,35 @@ async function getPatientUserOrThrow(userId: string) {
   return user
 }
 
+async function getAdminUserRecord(userId: string) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      subscription: {
+        include: { subscriptionPlan: true },
+      },
+      managedByOwner: {
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
+      _count: {
+        select: { ownedFamilyMembers: true },
+      },
+    },
+  })
+
+  if (!user) {
+    throw new HttpError('User not found.', 404)
+  }
+
+  return user
+}
+
 export async function listAdminUsers() {
   const users = await prisma.user.findMany({
     where: { role: USER_ROLES.USER },
@@ -70,40 +187,23 @@ export async function listAdminUsers() {
       subscription: {
         include: { subscriptionPlan: true },
       },
+      managedByOwner: {
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
+      _count: {
+        select: { ownedFamilyMembers: true },
+      },
     },
     orderBy: { createdAt: 'desc' },
   })
 
-  return users.map(user => {
-    const response = toAdminUserResponse(user)
-
-    if (user.isBlocked) {
-      return {
-        ...response,
-        status: 'blocked' as const,
-      }
-    }
-
-    if (
-      user.subscription &&
-      (user.subscription.status === 'active' || user.subscription.status === 'trialing')
-    ) {
-      return {
-        ...response,
-        plan: user.subscription.subscriptionPlan.planName,
-        status: 'active' as const,
-      }
-    }
-
-    if (user.subscription?.status === 'cancelled') {
-      return {
-        ...response,
-        status: 'cancelled' as const,
-      }
-    }
-
-    return response
-  })
+  return users.map(user => toAdminUserResponse(user))
 }
 
 export async function blockUser(userId: string) {
@@ -115,10 +215,13 @@ export async function blockUser(userId: string) {
 
   const updated = await prisma.user.update({
     where: { id: userId },
-    data: { isBlocked: true },
+    data: {
+      isBlocked: true,
+      tokenVersion: { increment: 1 },
+    },
   })
 
-  return toAdminUserResponse(updated)
+  return toAdminUserResponse(await getAdminUserRecord(updated.id))
 }
 
 export async function unblockUser(userId: string) {
@@ -133,13 +236,13 @@ export async function unblockUser(userId: string) {
     data: { isBlocked: false },
   })
 
-  return toAdminUserResponse(updated)
+  return toAdminUserResponse(await getAdminUserRecord(updated.id))
 }
 
-export async function assertUserNotBlocked(userId: string) {
+export async function assertUserNotBlocked(userId: string, tokenVersion?: number) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { isBlocked: true, role: true },
+    select: { isBlocked: true, role: true, tokenVersion: true },
   })
 
   if (!user) {
@@ -151,5 +254,11 @@ export async function assertUserNotBlocked(userId: string) {
       'Your account has been blocked. Please contact support.',
       403
     )
+  }
+
+  const sessionTokenVersion = tokenVersion ?? 0
+
+  if (user.role === USER_ROLES.USER && user.tokenVersion !== sessionTokenVersion) {
+    throw new HttpError('Your session has expired. Please sign in again.', 401)
   }
 }

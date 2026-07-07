@@ -4,7 +4,9 @@ import { jsonContent, jsonContentRequired } from 'stoker/openapi/helpers'
 import { zodResponseSchema } from '~/lib/zod-helper'
 import {
   changePasswordBodySchema,
+  deleteAccountBodySchema,
   messageResponseSchema,
+  patientDataExportSchema,
   patientSettingsSchema,
   updateAccountSettingsBodySchema,
   updateProfileBodySchema,
@@ -91,6 +93,49 @@ export const PATIENT_SETTINGS_ROUTES = {
       [HttpStatusCodes.BAD_REQUEST]: jsonContent(
         zodResponseSchema(messageResponseSchema),
         'Invalid password'
+      ),
+      [HttpStatusCodes.UNAUTHORIZED]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Unauthorized'
+      ),
+    },
+  }),
+
+  exportData: createRoute({
+    method: 'get',
+    tags: ['Patient Settings'],
+    path: '/settings/export',
+    summary: 'Export patient health data',
+    security: [{ bearerAuth: [] }],
+    responses: {
+      [HttpStatusCodes.OK]: jsonContent(
+        zodResponseSchema(patientDataExportSchema),
+        'Patient data export'
+      ),
+      [HttpStatusCodes.UNAUTHORIZED]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Unauthorized'
+      ),
+    },
+  }),
+
+  deleteAccount: createRoute({
+    method: 'post',
+    tags: ['Patient Settings'],
+    path: '/settings/delete-account',
+    summary: 'Permanently delete patient account',
+    security: [{ bearerAuth: [] }],
+    request: {
+      body: jsonContentRequired(deleteAccountBodySchema, 'Delete account confirmation'),
+    },
+    responses: {
+      [HttpStatusCodes.OK]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Account deleted'
+      ),
+      [HttpStatusCodes.BAD_REQUEST]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Invalid confirmation'
       ),
       [HttpStatusCodes.UNAUTHORIZED]: jsonContent(
         zodResponseSchema(messageResponseSchema),

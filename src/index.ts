@@ -2,9 +2,19 @@ import { cors } from 'hono/cors'
 import { registerRoutes } from '~/app'
 import { parseENV } from '~/config/env'
 import configureOpenAPI from '~/lib/configure-open-api'
+import { configureCloudinary } from '~/lib/cloudinary'
 import createApp from '~/lib/create-app'
 
 await parseENV()
+
+try {
+  configureCloudinary()
+} catch (error) {
+  console.warn(
+    'Cloudinary is not fully configured. File uploads will fail until CLOUDINARY_* env vars are set.',
+    error instanceof Error ? error.message : error
+  )
+}
 const app = createApp()
 
 function normalizeOrigin(url: string) {

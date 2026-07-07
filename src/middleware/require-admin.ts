@@ -24,7 +24,7 @@ export const requireAuth = createMiddleware<AppMiddlewareVariables<{ user: IPayl
     }
 
     if (payload.role === USER_ROLES.USER) {
-      await assertUserNotBlocked(payload.user_id)
+      await assertUserNotBlocked(payload.user_id, payload.tokenVersion)
     }
 
     c.set('user', payload)

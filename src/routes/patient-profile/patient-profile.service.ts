@@ -80,6 +80,9 @@ export async function completePatientOnboarding(
 function buildProfileUpdateData(input: CompleteOnboardingInput) {
   const firstName = input.firstName.trim()
   const lastName = input.lastName.trim()
+  const dateOfBirth = new Date(input.dateOfBirth)
+
+  assertDateOfBirthInPast(dateOfBirth)
 
   return {
     firstName,
@@ -88,9 +91,27 @@ function buildProfileUpdateData(input: CompleteOnboardingInput) {
     phone: input.phone.trim(),
     profileImage: input.profileImage?.trim() || null,
     gender: input.gender,
-    dateOfBirth: new Date(input.dateOfBirth),
+    dateOfBirth,
     bloodGroup: input.bloodGroup,
     address: input.address.trim(),
+  }
+}
+
+function assertDateOfBirthInPast(dateOfBirth: Date) {
+  const today = new Date()
+  const todayUtc = Date.UTC(
+    today.getUTCFullYear(),
+    today.getUTCMonth(),
+    today.getUTCDate()
+  )
+  const dobUtc = Date.UTC(
+    dateOfBirth.getUTCFullYear(),
+    dateOfBirth.getUTCMonth(),
+    dateOfBirth.getUTCDate()
+  )
+
+  if (dobUtc >= todayUtc) {
+    throw new HttpError('Date of birth must be in the past.', 400)
   }
 }
 

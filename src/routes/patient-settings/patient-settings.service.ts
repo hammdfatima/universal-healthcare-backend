@@ -1,6 +1,9 @@
+import { USER_ROLES } from '~/config/roles'
+import { deleteCloudinaryFile } from '~/lib/cloudinary'
 import { HttpError } from '~/lib/error'
 import { hashPassword, verifyPassword } from '~/lib/password'
 import prisma from '~/lib/prisma'
+import { getStripeClient } from '~/lib/stripe'
 import {
   getPatientProfile,
   updatePatientProfileData,
@@ -19,7 +22,7 @@ type UpdateProfileInput = {
 
 type UpdateAccountInput = {
   emailNotifications: boolean
-  marketingEmails: boolean
+  inAppNotifications: boolean
 }
 
 export async function getPatientSettings(userId: string) {
@@ -35,7 +38,7 @@ export async function getPatientSettings(userId: string) {
     profile,
     account: {
       emailNotifications: user.emailNotifications,
-      marketingEmails: user.marketingEmails,
+      inAppNotifications: user.inAppNotifications,
     },
   }
 }
@@ -60,7 +63,7 @@ export async function updatePatientAccountSettings(
     where: { id: userId },
     data: {
       emailNotifications: input.emailNotifications,
-      marketingEmails: input.marketingEmails,
+      inAppNotifications: input.inAppNotifications,
     },
   })
 
@@ -68,7 +71,7 @@ export async function updatePatientAccountSettings(
     profile: await getPatientProfile(userId),
     account: {
       emailNotifications: user.emailNotifications,
-      marketingEmails: user.marketingEmails,
+      inAppNotifications: user.inAppNotifications,
     },
   }
 }
@@ -82,7 +85,7 @@ async function getAccountSettings(userId: string) {
 
   return {
     emailNotifications: user.emailNotifications,
-    marketingEmails: user.marketingEmails,
+    inAppNotifications: user.inAppNotifications,
   }
 }
 
@@ -116,4 +119,171 @@ export async function changePatientPassword(
       mustChangePassword: false,
     },
   })
+}
+
+type CloudinaryResourceType = 'image' | 'video' | 'raw' | 'auto'
+
+async function deleteUserUploadedFiles(userId: string) {
+  const [labResults, imagingResults] = await Promise.all([
+    prisma.labResult.findMany({ where: { userId } }),
+    prisma.imagingResult.findMany({ where: { userId } }),
+  ])
+
+  for (const record of [...labResults, ...imagingResults]) {
+    const resourceType = (record.fileResourceType ?? 'image') as CloudinaryResourceType
+
+    try {
+      await deleteCloudinaryFile(record.filePublicId, resourceType)
+    } catch {
+      // File may already be removed from Cloudinary.
+    }
+  }
+}
+
+async function cancelUserStripeSubscription(userId: string) {
+  const subscription = await prisma.userSubscription.findUnique({
+    where: { userId },
+  })
+
+  if (!subscription?.stripeSubscriptionId) {
+    return
+  }
+
+  try {
+    const stripe = getStripeClient()
+    await stripe.subscriptions.cancel(subscription.stripeSubscriptionId)
+  } catch {
+    // Continue account deletion even if Stripe cancellation fails.
+  }
+}
+
+async function permanentlyDeleteUser(userId: string) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { role: true },
+  })
+
+  if (!user) {
+    return
+  }
+
+  if (user.role !== USER_ROLES.USER) {
+    throw new HttpError('Only patient accounts can be deleted.', 400)
+  }
+
+  await deleteUserUploadedFiles(userId)
+  await cancelUserStripeSubscription(userId)
+  await prisma.user.delete({ where: { id: userId } })
+}
+
+export async function exportPatientData(userId: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } })
+
+  if (!user) {
+    throw new HttpError('User not found.', 404)
+  }
+
+  if (user.role !== USER_ROLES.USER) {
+    throw new HttpError('Forbidden', 403)
+  }
+
+  const [
+    profile,
+    medications,
+    allergies,
+    healthHistory,
+    vaccinations,
+    labResults,
+    imagingResults,
+    careProviders,
+    familyMembers,
+  ] = await Promise.all([
+    getPatientProfile(userId),
+    prisma.medication.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } }),
+    prisma.allergy.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } }),
+    prisma.healthHistoryEntry.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } }),
+    prisma.vaccination.findMany({ where: { userId }, orderBy: { vaccinationDate: 'desc' } }),
+    prisma.labResult.findMany({ where: { userId }, orderBy: { testDate: 'desc' } }),
+    prisma.imagingResult.findMany({ where: { userId }, orderBy: { scanDate: 'desc' } }),
+    prisma.careProvider.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } }),
+    prisma.familyMember.findMany({
+      where: { ownerId: userId },
+      include: {
+        memberUser: {
+          select: {
+            email: true,
+            firstName: true,
+            lastName: true,
+            phone: true,
+            dateOfBirth: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    }),
+  ])
+
+  return {
+    exportedAt: new Date().toISOString(),
+    profile,
+    medications,
+    allergies,
+    healthHistory,
+    vaccinations: vaccinations.map(record => ({
+      ...record,
+      vaccinationDate: record.vaccinationDate.toISOString(),
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+    })),
+    labResults: labResults.map(record => ({
+      ...record,
+      testDate: record.testDate.toISOString(),
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+    })),
+    imagingResults: imagingResults.map(record => ({
+      ...record,
+      scanDate: record.scanDate.toISOString(),
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+    })),
+    careProviders,
+    familyMembers: familyMembers.map(record => ({
+      id: record.id,
+      relationship: record.relationship,
+      isEmergencyContact: record.isEmergencyContact,
+      member: record.memberUser,
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+    })),
+  }
+}
+
+export async function deletePatientAccount(userId: string, confirmation: string) {
+  if (confirmation !== 'DELETE') {
+    throw new HttpError('Type DELETE to confirm account deletion.', 400)
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      ownedFamilyMembers: {
+        select: { memberUserId: true },
+      },
+    },
+  })
+
+  if (!user) {
+    throw new HttpError('User not found.', 404)
+  }
+
+  if (user.role !== USER_ROLES.USER) {
+    throw new HttpError('Only patient accounts can be deleted.', 400)
+  }
+
+  for (const familyMember of user.ownedFamilyMembers) {
+    await permanentlyDeleteUser(familyMember.memberUserId)
+  }
+
+  await permanentlyDeleteUser(userId)
 }

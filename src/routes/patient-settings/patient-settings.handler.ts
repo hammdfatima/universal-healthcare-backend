@@ -3,6 +3,8 @@ import { HttpError } from '~/lib/error'
 import type { PATIENT_SETTINGS_ROUTES } from '~/routes/patient-settings/patient-settings.routes'
 import {
   changePatientPassword,
+  deletePatientAccount,
+  exportPatientData,
   getPatientSettings,
   updatePatientAccountSettings,
   updatePatientSettingsProfile,
@@ -86,6 +88,45 @@ export const PATIENT_SETTINGS_ROUTE_HANDLER: HandlerMapFromRoutes<
         success: true,
         message: 'Password updated successfully.',
         data: { message: 'Password updated successfully.' },
+      },
+      HttpStatusCodes.OK
+    )
+  },
+
+  exportData: async c => {
+    const authUser = c.get('user')
+
+    if (!authUser) {
+      throw new HttpError('Unauthorized', 401)
+    }
+
+    const data = await exportPatientData(authUser.user_id)
+
+    return c.json(
+      {
+        success: true,
+        message: 'Patient data exported successfully.',
+        data,
+      },
+      HttpStatusCodes.OK
+    )
+  },
+
+  deleteAccount: async c => {
+    const authUser = c.get('user')
+
+    if (!authUser) {
+      throw new HttpError('Unauthorized', 401)
+    }
+
+    const { confirmation } = c.req.valid('json')
+    await deletePatientAccount(authUser.user_id, confirmation)
+
+    return c.json(
+      {
+        success: true,
+        message: 'Account deleted successfully.',
+        data: { message: 'Account deleted successfully.' },
       },
       HttpStatusCodes.OK
     )

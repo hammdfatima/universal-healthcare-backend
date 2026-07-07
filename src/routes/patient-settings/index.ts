@@ -25,5 +25,13 @@ router
     PATIENT_SETTINGS_ROUTES.changePassword,
     PATIENT_SETTINGS_ROUTE_HANDLER.changePassword
   )
+  .openapi(
+    PATIENT_SETTINGS_ROUTES.exportData,
+    PATIENT_SETTINGS_ROUTE_HANDLER.exportData
+  )
+  .openapi(
+    PATIENT_SETTINGS_ROUTES.deleteAccount,
+    PATIENT_SETTINGS_ROUTE_HANDLER.deleteAccount
+  )
 
 export default router

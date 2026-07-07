@@ -78,3 +78,9 @@ export const messageResponseSchema = z
     message: z.string(),
   })
   .openapi('MessageResponse')
+
+export const sessionResponseSchema = z
+  .object({
+    valid: z.literal(true),
+  })
+  .openapi('SessionResponse')

@@ -9,7 +9,7 @@ import { patientProfileSchema } from '~/routes/patient-profile/patient-profile.s
 export const accountSettingsSchema = z
   .object({
     emailNotifications: z.boolean(),
-    marketingEmails: z.boolean(),
+    inAppNotifications: z.boolean(),
   })
   .openapi('AccountSettings')
 
@@ -45,6 +45,27 @@ export const changePasswordBodySchema = z
     newPassword: strongPasswordSchema.openapi({ example: 'Password1!' }),
   })
   .openapi('PatientChangePasswordBody')
+
+export const deleteAccountBodySchema = z
+  .object({
+    confirmation: z.literal('DELETE'),
+  })
+  .openapi('DeleteAccountBody')
+
+export const patientDataExportSchema = z
+  .object({
+    exportedAt: z.string(),
+    profile: z.record(z.string(), z.unknown()),
+    medications: z.array(z.record(z.string(), z.unknown())),
+    allergies: z.array(z.record(z.string(), z.unknown())),
+    healthHistory: z.array(z.record(z.string(), z.unknown())),
+    vaccinations: z.array(z.record(z.string(), z.unknown())),
+    labResults: z.array(z.record(z.string(), z.unknown())),
+    imagingResults: z.array(z.record(z.string(), z.unknown())),
+    careProviders: z.array(z.record(z.string(), z.unknown())),
+    familyMembers: z.array(z.record(z.string(), z.unknown())),
+  })
+  .openapi('PatientDataExport')
 
 export const messageResponseSchema = z
   .object({

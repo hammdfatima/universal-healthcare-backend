@@ -27,6 +27,7 @@ export interface IPayload {
   user_id: string
   email: string
   role: UserRole
+  tokenVersion?: number
 }
 
 export type HandlerMapFromRoutes<T extends Record<string, RouteConfig>> = {
