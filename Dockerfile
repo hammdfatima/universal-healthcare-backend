@@ -11,6 +11,7 @@ COPY tsconfig.json zod.config.json ./
 
 # Prisma needs DATABASE_URL at generate time (value is not used to connect).
 ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=public"
+ENV DIRECT_DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=public"
 
 RUN bun run db:generate
 

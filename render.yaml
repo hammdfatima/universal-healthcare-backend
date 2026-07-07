@@ -21,6 +21,8 @@ services:
         generateValue: true
       - key: DATABASE_URL
         sync: false
+      - key: DIRECT_DATABASE_URL
+        sync: false
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
