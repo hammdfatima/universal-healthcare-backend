@@ -1,4 +1,4 @@
-FROM oven/bun:1.2-slim AS base
+FROM oven/bun:1.2-slim AS builder
 WORKDIR /app
 
 RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
@@ -9,27 +9,31 @@ RUN bun install --frozen-lockfile
 COPY prisma ./prisma
 COPY tsconfig.json zod.config.json ./
 
-# Prisma needs DATABASE_URL at generate time (value is not used to connect).
-ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=public"
-ENV DIRECT_DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=public"
-
-RUN bun run db:generate
+# Build-time only: Prisma needs these env vars to parse the schema (no DB connection).
+RUN DATABASE_URL="postgresql://build:build@localhost:5432/build?schema=public" \
+    DIRECT_DATABASE_URL="postgresql://build:build@localhost:5432/build?schema=public" \
+    bun run db:generate
 
 COPY src ./src
 
-FROM base AS production
+FROM oven/bun:1.2-slim AS production
 WORKDIR /app
+
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
 
-COPY --from=base /app/node_modules ./node_modules
-COPY --from=base /app/package.json ./
-COPY --from=base /app/bun.lock ./
-COPY --from=base /app/prisma ./prisma
-COPY --from=base /app/src ./src
-COPY --from=base /app/tsconfig.json ./
-COPY --from=base /app/zod.config.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/bun.lock ./
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/tsconfig.json ./
+COPY --from=builder /app/zod.config.json ./
+COPY scripts/docker-start.sh ./scripts/docker-start.sh
+
+RUN chmod +x ./scripts/docker-start.sh
 
 EXPOSE 8080
 
-CMD ["sh", "-c", "bun run db:deploy && bun src/index.ts"]
+CMD ["./scripts/docker-start.sh"]
