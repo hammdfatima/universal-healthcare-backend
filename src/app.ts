@@ -1,4 +1,5 @@
 import { API_START_POINT } from '~/config/constants'
+import emergencyAccessRouter from '~/routes/emergency-access'
 import adminDashboardRouter from '~/routes/admin-dashboard'
 import adminPaymentsRouter from '~/routes/admin-payments'
 import adminProfileRouter from '~/routes/admin-profile'
@@ -45,6 +46,7 @@ export function registerRoutes(app: AppOpenAPI) {
     .route(API_START_POINT, labResultsRouter)
     .route(API_START_POINT, imagingResultsRouter)
     .route(API_START_POINT, patientSettingsRouter)
+    .route(API_START_POINT, emergencyAccessRouter)
     .route(API_START_POINT, subscriptionsRouter)
     .route('/test', router)
 }

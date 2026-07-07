@@ -112,6 +112,20 @@ model User {
   payments                  Payment[]
   notifications             Notification[]
   repliedUserQueries        UserQuery[] @relation("UserQueryRepliedBy")
+  emergencyAccessToken      EmergencyAccessToken?
+}
+
+model EmergencyAccessToken {
+  id             String    @id @default(cuid())
+  userId         String    @unique
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token          String    @unique
+  isActive       Boolean   @default(true)
+  lastAccessedAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([token])
 }
 
 model UserSubscription {
