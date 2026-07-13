@@ -4,6 +4,7 @@ import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { HttpError } from '~/lib/error'
 import { decryptPhi, encryptPhiRequired } from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
+import { resolveVaultPatientId } from '~/lib/vault-access'
 
 type HealthHistoryInput = {
   illnessName: string
@@ -77,8 +78,11 @@ async function getOwnedHealthHistoryEntry(userId: string, entryId: string) {
   return record
 }
 
-export async function listHealthHistoryEntries(userId: string) {
-  await assertPatientUser(userId)
+export async function listHealthHistoryEntries(
+  actorUserId: string,
+  requestedPatientUserId?: string | null
+) {
+  const userId = await resolveVaultPatientId(actorUserId, requestedPatientUserId)
 
   const entries = await prisma.healthHistoryEntry.findMany({
     where: { userId },
@@ -86,7 +90,7 @@ export async function listHealthHistoryEntries(userId: string) {
   })
   await writeAuditLog({
     action: AUDIT_ACTIONS.PHI_READ,
-    actorUserId: userId,
+    actorUserId,
     patientUserId: userId,
     resourceType: 'HealthHistoryEntry',
   })

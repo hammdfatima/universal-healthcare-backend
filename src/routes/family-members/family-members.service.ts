@@ -3,6 +3,7 @@ import type { FamilyMember, User } from '~/generated/prisma'
 import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { sendFamilyMemberWelcomeEmail } from '~/lib/email'
 import { HttpError } from '~/lib/error'
+import { countHouseholdSeats } from '~/lib/household-seats'
 import { hashPassword } from '~/lib/password'
 import {
   decryptDateNullable,
@@ -13,6 +14,8 @@ import {
 import { getFamilyMemberLimit, getPlanTier, supportsFamilyMembers } from '~/lib/plan-tier'
 import prisma from '~/lib/prisma'
 import { isSubscriptionActive } from '~/routes/subscriptions/subscriptions.service'
+
+const HUMAN_RELATIONSHIPS = new Set(['Spouse', 'Child', 'Parent', 'Sibling'])
 
 type CreateFamilyMemberInput = {
   firstName: string
@@ -74,6 +77,36 @@ function parseDateOfBirth(value: string): Date {
   }
 
   return parsed
+}
+
+function assertHumanRelationship(
+  relationship: string,
+  tier: 'couple' | 'family' | 'individual' | null
+) {
+  const normalized = relationship.trim()
+
+  if (normalized.toLowerCase() === 'pet') {
+    throw new HttpError(
+      'Pets are managed from the Pets tab and do not use a separate login account.',
+      400
+    )
+  }
+
+  if (tier === 'couple') {
+    if (normalized !== 'Spouse') {
+      throw new HttpError('Couple plans can only add a spouse profile.', 400)
+    }
+    return 'Spouse'
+  }
+
+  if (!HUMAN_RELATIONSHIPS.has(normalized)) {
+    throw new HttpError(
+      'Relationship must be Spouse, Child, Parent, or Sibling. Add pets from the Pets tab.',
+      400
+    )
+  }
+
+  return normalized
 }
 
 function toFamilyMemberResponse(
@@ -165,11 +198,14 @@ export async function listFamilyMembers(ownerId: string) {
   const owner = await getOwnerWithSubscription(ownerId)
   const { limit } = assertOwnerCanManageFamily(owner)
 
-  const members = await prisma.familyMember.findMany({
-    where: { ownerId },
-    include: { memberUser: true },
-    orderBy: { createdAt: 'asc' },
-  })
+  const [members, seats] = await Promise.all([
+    prisma.familyMember.findMany({
+      where: { ownerId },
+      include: { memberUser: true },
+      orderBy: { createdAt: 'asc' },
+    }),
+    countHouseholdSeats(ownerId),
+  ])
   await writeAuditLog({
     action: AUDIT_ACTIONS.PHI_READ,
     actorUserId: ownerId,
@@ -180,26 +216,23 @@ export async function listFamilyMembers(ownerId: string) {
   return {
     members: members.map(toFamilyMemberResponse),
     limit,
+    usedSeats: seats.usedSeats,
+    petCount: seats.petCount,
   }
 }
 
 export async function createFamilyMember(ownerId: string, input: CreateFamilyMemberInput) {
   const owner = await getOwnerWithSubscription(ownerId)
   const { tier, limit, subscription } = assertOwnerCanManageFamily(owner)
+  const relationship = assertHumanRelationship(input.relationship, tier)
 
-  if (tier === 'couple' && input.relationship.trim() !== 'Spouse') {
-    throw new HttpError('Couple plans can only add a spouse profile.', 400)
-  }
+  const seats = await countHouseholdSeats(ownerId)
 
-  const existingCount = await prisma.familyMember.count({
-    where: { ownerId },
-  })
-
-  if (existingCount >= limit) {
+  if (seats.usedSeats >= limit) {
     throw new HttpError(
       tier === 'couple'
-        ? "Your couple's plan allows only one spouse profile."
-        : `Your family plan allows up to ${limit} members.`,
+        ? "Your couple's plan allows only one household profile (spouse or pet)."
+        : `Your family plan allows up to ${limit} household members including pets.`,
       400
     )
   }
@@ -249,7 +282,7 @@ export async function createFamilyMember(ownerId: string, input: CreateFamilyMem
       data: {
         ownerId,
         memberUserId: memberUser.id,
-        relationship: tier === 'couple' ? 'Spouse' : input.relationship.trim(),
+        relationship,
         isEmergencyContact: input.isEmergencyContact,
       },
       include: {
@@ -284,10 +317,7 @@ export async function updateFamilyMember(
   const owner = await getOwnerWithSubscription(ownerId)
   const { tier } = assertOwnerCanManageFamily(owner)
   const record = await getOwnedFamilyMember(ownerId, familyMemberId)
-
-  if (tier === 'couple' && input.relationship.trim() !== 'Spouse') {
-    throw new HttpError('Couple plans can only manage a spouse profile.', 400)
-  }
+  const relationship = assertHumanRelationship(input.relationship, tier)
 
   const firstName = input.firstName.trim()
   const lastName = input.lastName.trim()
@@ -308,7 +338,7 @@ export async function updateFamilyMember(
     return tx.familyMember.update({
       where: { id: record.id },
       data: {
-        relationship: tier === 'couple' ? 'Spouse' : input.relationship.trim(),
+        relationship,
         isEmergencyContact: input.isEmergencyContact,
       },
       include: {

@@ -6,6 +6,7 @@ import { HttpError } from '~/lib/error'
 import { notifyLabResultUploaded } from '~/lib/notifications'
 import { decryptPhi, encryptPhiRequired } from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
+import { resolveVaultPatientId } from '~/lib/vault-access'
 
 type LabResultInput = {
   fileName: string
@@ -133,8 +134,11 @@ function normalizeInput(input: LabResultInput, userId: string) {
   }
 }
 
-export async function listLabResults(userId: string) {
-  await assertPatientUser(userId)
+export async function listLabResults(
+  actorUserId: string,
+  requestedPatientUserId?: string | null
+) {
+  const userId = await resolveVaultPatientId(actorUserId, requestedPatientUserId)
 
   const labResults = await prisma.labResult.findMany({
     where: { userId },
@@ -142,7 +146,7 @@ export async function listLabResults(userId: string) {
   })
   await writeAuditLog({
     action: AUDIT_ACTIONS.PHI_READ,
-    actorUserId: userId,
+    actorUserId,
     patientUserId: userId,
     resourceType: 'LabResult',
   })

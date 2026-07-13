@@ -19,6 +19,7 @@ type AdminUserRecord = User & {
   managedByOwner: Pick<User, 'id' | 'email' | 'name' | 'firstName' | 'lastName'> | null
   _count: {
     ownedFamilyMembers: number
+    ownedPets: number
   }
 }
 
@@ -53,7 +54,7 @@ function deriveStatus(user: User): UserStatus {
 
 function buildFamilyMemberInfo(user: AdminUserRecord) {
   const isFamilyMemberAccount = Boolean(user.managedByOwnerId)
-  const familyMemberCount = user._count.ownedFamilyMembers
+  const familyMemberCount = user._count.ownedFamilyMembers + user._count.ownedPets
 
   if (isFamilyMemberAccount && user.managedByOwner) {
     return {
@@ -172,7 +173,7 @@ async function getAdminUserRecord(userId: string) {
         },
       },
       _count: {
-        select: { ownedFamilyMembers: true },
+        select: { ownedFamilyMembers: true, ownedPets: true },
       },
     },
   })
@@ -201,7 +202,7 @@ export async function listAdminUsers(actorUserId?: string) {
         },
       },
       _count: {
-        select: { ownedFamilyMembers: true },
+        select: { ownedFamilyMembers: true, ownedPets: true },
       },
     },
     orderBy: { createdAt: 'desc' },

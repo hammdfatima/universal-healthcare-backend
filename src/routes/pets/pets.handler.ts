@@ -1,38 +1,35 @@
 import * as HttpStatusCodes from 'stoker/http-status-codes'
 import { HttpError } from '~/lib/error'
-import type { LAB_RESULTS_ROUTES } from '~/routes/lab-results/lab-results.routes'
+import type { PETS_ROUTES } from '~/routes/pets/pets.routes'
 import {
-  createLabResult,
-  deleteLabResult,
-  listLabResults,
-  updateLabResult,
-} from '~/routes/lab-results/lab-results.service'
+  createPet,
+  deletePet,
+  listPets,
+  updatePet,
+} from '~/routes/pets/pets.service'
 import type { HandlerMapFromRoutes } from '~/types'
 
-export const LAB_RESULTS_ROUTE_HANDLER: HandlerMapFromRoutes<
-  typeof LAB_RESULTS_ROUTES
-> = {
-  listLabResults: async c => {
+export const PETS_ROUTE_HANDLER: HandlerMapFromRoutes<typeof PETS_ROUTES> = {
+  listPets: async c => {
     const authUser = c.get('user')
 
     if (!authUser) {
       throw new HttpError('Unauthorized', 401)
     }
 
-    const patientUserId = c.req.query('patientUserId')
-    const data = await listLabResults(authUser.user_id, patientUserId)
+    const data = await listPets(authUser.user_id)
 
     return c.json(
       {
         success: true,
-        message: 'Lab results fetched successfully.',
+        message: 'Pets fetched successfully.',
         data,
       },
       HttpStatusCodes.OK
     )
   },
 
-  createLabResult: async c => {
+  createPet: async c => {
     const authUser = c.get('user')
 
     if (!authUser) {
@@ -40,19 +37,19 @@ export const LAB_RESULTS_ROUTE_HANDLER: HandlerMapFromRoutes<
     }
 
     const body = c.req.valid('json')
-    const labResult = await createLabResult(authUser.user_id, body)
+    const pet = await createPet(authUser.user_id, body)
 
     return c.json(
       {
         success: true,
-        message: 'Lab result created successfully.',
-        data: labResult,
+        message: 'Pet created successfully.',
+        data: pet,
       },
       HttpStatusCodes.CREATED
     )
   },
 
-  updateLabResult: async c => {
+  updatePet: async c => {
     const authUser = c.get('user')
 
     if (!authUser) {
@@ -61,19 +58,19 @@ export const LAB_RESULTS_ROUTE_HANDLER: HandlerMapFromRoutes<
 
     const { id } = c.req.valid('param')
     const body = c.req.valid('json')
-    const labResult = await updateLabResult(authUser.user_id, id, body)
+    const pet = await updatePet(authUser.user_id, id, body)
 
     return c.json(
       {
         success: true,
-        message: 'Lab result updated successfully.',
-        data: labResult,
+        message: 'Pet updated successfully.',
+        data: pet,
       },
       HttpStatusCodes.OK
     )
   },
 
-  deleteLabResult: async c => {
+  deletePet: async c => {
     const authUser = c.get('user')
 
     if (!authUser) {
@@ -81,13 +78,13 @@ export const LAB_RESULTS_ROUTE_HANDLER: HandlerMapFromRoutes<
     }
 
     const { id } = c.req.valid('param')
-    await deleteLabResult(authUser.user_id, id)
+    await deletePet(authUser.user_id, id)
 
     return c.json(
       {
         success: true,
-        message: 'Lab result deleted successfully.',
-        data: { message: 'Lab result deleted successfully.' },
+        message: 'Pet deleted successfully.',
+        data: { message: 'Pet deleted successfully.' },
       },
       HttpStatusCodes.OK
     )

@@ -21,6 +21,8 @@ export const familyMembersListSchema = z
   .object({
     members: z.array(familyMemberSchema),
     limit: z.number().int(),
+    usedSeats: z.number().int(),
+    petCount: z.number().int(),
   })
   .openapi('FamilyMembersList')
 

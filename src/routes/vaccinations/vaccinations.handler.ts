@@ -19,7 +19,8 @@ export const VACCINATIONS_ROUTE_HANDLER: HandlerMapFromRoutes<
       throw new HttpError('Unauthorized', 401)
     }
 
-    const data = await listVaccinations(authUser.user_id)
+    const patientUserId = c.req.query('patientUserId')
+    const data = await listVaccinations(authUser.user_id, patientUserId)
 
     return c.json(
       {

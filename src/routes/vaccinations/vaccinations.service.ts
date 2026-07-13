@@ -5,6 +5,7 @@ import { HttpError } from '~/lib/error'
 import { notifyVaccinationAdded } from '~/lib/notifications'
 import { decryptPhi, encryptPhiRequired } from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
+import { resolveVaultPatientId } from '~/lib/vault-access'
 
 type VaccinationInput = {
   vaccineName: string
@@ -120,8 +121,11 @@ async function getOwnedVaccination(userId: string, vaccinationId: string) {
   return record
 }
 
-export async function listVaccinations(userId: string) {
-  await assertPatientUser(userId)
+export async function listVaccinations(
+  actorUserId: string,
+  requestedPatientUserId?: string | null
+) {
+  const userId = await resolveVaultPatientId(actorUserId, requestedPatientUserId)
 
   const vaccinations = await prisma.vaccination.findMany({
     where: { userId },
@@ -129,7 +133,7 @@ export async function listVaccinations(userId: string) {
   })
   await writeAuditLog({
     action: AUDIT_ACTIONS.PHI_READ,
-    actorUserId: userId,
+    actorUserId,
     patientUserId: userId,
     resourceType: 'Vaccination',
   })

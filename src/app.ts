@@ -13,9 +13,11 @@ import healthHistoryRouter from '~/routes/health-history'
 import imagingResultsRouter from '~/routes/imaging-results'
 import labResultsRouter from '~/routes/lab-results'
 import medicationsRouter from '~/routes/medications'
+import medicalRecordSharesRouter from '~/routes/medical-record-shares'
 import notificationsRouter from '~/routes/notifications'
 import patientDashboardRouter from '~/routes/patient-dashboard'
 import patientProfileRouter from '~/routes/patient-profile'
+import petsRouter from '~/routes/pets'
 import vaccinationsRouter from '~/routes/vaccinations'
 import patientSettingsRouter from '~/routes/patient-settings'
 import subscriptionsRouter from '~/routes/subscriptions'
@@ -39,8 +41,10 @@ export function registerRoutes(app: AppOpenAPI) {
     .route(API_START_POINT, patientProfileRouter)
     .route(API_START_POINT, patientDashboardRouter)
     .route(API_START_POINT, familyMembersRouter)
+    .route(API_START_POINT, petsRouter)
     .route(API_START_POINT, careProvidersRouter)
     .route(API_START_POINT, medicationsRouter)
+    .route(API_START_POINT, medicalRecordSharesRouter)
     .route(API_START_POINT, notificationsRouter)
     .route(API_START_POINT, allergiesRouter)
     .route(API_START_POINT, healthHistoryRouter)
