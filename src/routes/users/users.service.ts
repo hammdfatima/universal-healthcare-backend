@@ -1,11 +1,9 @@
-import type { SubscriptionStatus, User } from '~/generated/prisma'
 import { USER_ROLES } from '~/config/roles'
+import type { SubscriptionStatus, User } from '~/generated/prisma'
+import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { HttpError } from '~/lib/error'
-import {
-  getFamilyMemberLimit,
-  getPlanTier,
-  supportsFamilyMembers,
-} from '~/lib/plan-tier'
+import { decryptPhiNullable } from '~/lib/phi-crypto'
+import { getFamilyMemberLimit, getPlanTier, supportsFamilyMembers } from '~/lib/plan-tier'
 import prisma from '~/lib/prisma'
 import { isSubscriptionActive } from '~/routes/subscriptions/subscriptions.service'
 
@@ -25,11 +23,14 @@ type AdminUserRecord = User & {
 }
 
 function getDisplayName(user: Pick<User, 'name' | 'firstName' | 'lastName' | 'email'>): string {
-  if (user.name?.trim()) {
-    return user.name.trim()
+  const name = decryptPhiNullable(user.name)
+  if (name?.trim()) {
+    return name.trim()
   }
 
-  const parts = [user.firstName, user.lastName].filter(Boolean)
+  const parts = [decryptPhiNullable(user.firstName), decryptPhiNullable(user.lastName)].filter(
+    (part): part is string => Boolean(part)
+  )
 
   if (parts.length > 0) {
     return parts.join(' ')
@@ -75,8 +76,7 @@ function buildFamilyMemberInfo(user: AdminUserRecord) {
     user.subscription && isSubscriptionActive(user.subscription.status)
   )
   const familyMemberLimit = hasActiveSubscription ? getFamilyMemberLimit(tier) : 0
-  const canAddFamilyMembers =
-    hasActiveSubscription && supportsFamilyMembers(tier)
+  const canAddFamilyMembers = hasActiveSubscription && supportsFamilyMembers(tier)
   const familyMembersRemaining = canAddFamilyMembers
     ? Math.max(0, familyMemberLimit - familyMemberCount)
     : 0
@@ -96,8 +96,12 @@ function toAdminUserResponse(user: AdminUserRecord) {
     id: user.id,
     name: getDisplayName(user),
     email: user.email,
-    firstName: user.firstName,
-    lastName: user.lastName,
+    firstName: decryptPhiNullable(user.firstName),
+    lastName: decryptPhiNullable(user.lastName),
+    phone: decryptPhiNullable(user.phone),
+    address: decryptPhiNullable(user.address),
+    bloodGroup: decryptPhiNullable(user.bloodGroup),
+    gender: decryptPhiNullable(user.gender),
     profileImage: user.profileImage,
     plan: null as string | null,
     status: deriveStatus(user),
@@ -180,7 +184,7 @@ async function getAdminUserRecord(userId: string) {
   return user
 }
 
-export async function listAdminUsers() {
+export async function listAdminUsers(actorUserId?: string) {
   const users = await prisma.user.findMany({
     where: { role: USER_ROLES.USER },
     include: {
@@ -203,10 +207,17 @@ export async function listAdminUsers() {
     orderBy: { createdAt: 'desc' },
   })
 
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_READ,
+    actorUserId,
+    resourceType: 'PatientProfile',
+    metadata: { scope: 'admin-user-list', recordCount: users.length },
+  })
+
   return users.map(user => toAdminUserResponse(user))
 }
 
-export async function blockUser(userId: string) {
+export async function blockUser(userId: string, actorUserId?: string) {
   const user = await getPatientUserOrThrow(userId)
 
   if (user.isBlocked) {
@@ -220,11 +231,18 @@ export async function blockUser(userId: string) {
       tokenVersion: { increment: 1 },
     },
   })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.ADMIN_USER_BLOCK,
+    actorUserId,
+    patientUserId: userId,
+    resourceType: 'User',
+    resourceId: userId,
+  })
 
   return toAdminUserResponse(await getAdminUserRecord(updated.id))
 }
 
-export async function unblockUser(userId: string) {
+export async function unblockUser(userId: string, actorUserId?: string) {
   const user = await getPatientUserOrThrow(userId)
 
   if (!user.isBlocked) {
@@ -234,6 +252,13 @@ export async function unblockUser(userId: string) {
   const updated = await prisma.user.update({
     where: { id: userId },
     data: { isBlocked: false },
+  })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.ADMIN_USER_UNBLOCK,
+    actorUserId,
+    patientUserId: userId,
+    resourceType: 'User',
+    resourceId: userId,
   })
 
   return toAdminUserResponse(await getAdminUserRecord(updated.id))
@@ -249,16 +274,13 @@ export async function assertUserNotBlocked(userId: string, tokenVersion?: number
     throw new HttpError('User not found.', 404)
   }
 
-  if (user.role === USER_ROLES.USER && user.isBlocked) {
-    throw new HttpError(
-      'Your account has been blocked. Please contact support.',
-      403
-    )
+  if (user.isBlocked) {
+    throw new HttpError('Your account has been blocked. Please contact support.', 403)
   }
 
   const sessionTokenVersion = tokenVersion ?? 0
 
-  if (user.role === USER_ROLES.USER && user.tokenVersion !== sessionTokenVersion) {
+  if (user.tokenVersion !== sessionTokenVersion) {
     throw new HttpError('Your session has expired. Please sign in again.', 401)
   }
 }

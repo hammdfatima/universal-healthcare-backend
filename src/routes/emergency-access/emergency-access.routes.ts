@@ -1,13 +1,16 @@
 import { createRoute } from '@hono/zod-openapi'
 import * as HttpStatusCodes from 'stoker/http-status-codes'
-import { jsonContent } from 'stoker/openapi/helpers'
+import { jsonContent, jsonContentRequired } from 'stoker/openapi/helpers'
 import { zodResponseSchema } from '~/lib/zod-helper'
 import {
   emergencyAccessStatusSchema,
   emergencyAccessTokenParamSchema,
   emergencyAccessTokenSchema,
+  generateEmergencyAccessBodySchema,
   messageResponseSchema,
+  publicEmergencyChallengeSchema,
   publicEmergencyRecordsSchema,
+  unlockEmergencyAccessBodySchema,
 } from '~/routes/emergency-access/emergency-access.schemas'
 
 export const EMERGENCY_ACCESS_ROUTES = {
@@ -33,8 +36,14 @@ export const EMERGENCY_ACCESS_ROUTES = {
     method: 'post',
     tags: ['Emergency Access'],
     path: '/emergency-access/generate',
-    summary: 'Generate or regenerate emergency QR access link',
+    summary: 'Generate or regenerate emergency QR access link with PIN',
     security: [{ bearerAuth: [] }],
+    request: {
+      body: jsonContentRequired(
+        generateEmergencyAccessBodySchema,
+        'Emergency access PIN'
+      ),
+    },
     responses: {
       [HttpStatusCodes.OK]: jsonContent(
         zodResponseSchema(emergencyAccessTokenSchema),
@@ -69,22 +78,54 @@ export const EMERGENCY_ACCESS_ROUTES = {
     },
   }),
 
-  getPublicRecords: createRoute({
+  getPublicChallenge: createRoute({
     method: 'get',
     tags: ['Emergency Access'],
     path: '/emergency-access/public/{token}',
-    summary: 'View patient medical records via emergency access token',
+    summary: 'Get emergency access challenge metadata (no PHI)',
     request: {
       params: emergencyAccessTokenParamSchema,
+    },
+    responses: {
+      [HttpStatusCodes.OK]: jsonContent(
+        zodResponseSchema(publicEmergencyChallengeSchema),
+        'Emergency access challenge'
+      ),
+      [HttpStatusCodes.NOT_FOUND]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Invalid or revoked token'
+      ),
+    },
+  }),
+
+  unlockPublicRecords: createRoute({
+    method: 'post',
+    tags: ['Emergency Access'],
+    path: '/emergency-access/public/{token}/unlock',
+    summary: 'Unlock emergency medical records with PIN',
+    request: {
+      params: emergencyAccessTokenParamSchema,
+      body: jsonContentRequired(
+        unlockEmergencyAccessBodySchema,
+        'Emergency access PIN'
+      ),
     },
     responses: {
       [HttpStatusCodes.OK]: jsonContent(
         zodResponseSchema(publicEmergencyRecordsSchema),
         'Emergency medical records'
       ),
+      [HttpStatusCodes.UNAUTHORIZED]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Invalid PIN'
+      ),
       [HttpStatusCodes.NOT_FOUND]: jsonContent(
         zodResponseSchema(messageResponseSchema),
         'Invalid or revoked token'
+      ),
+      [HttpStatusCodes.TOO_MANY_REQUESTS]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Too many failed attempts'
       ),
     },
   }),

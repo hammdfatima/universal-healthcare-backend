@@ -1,5 +1,5 @@
-import { USER_ROLES } from '~/config/roles'
-import { HttpError } from '~/lib/error'
+import { assertPatientUser } from '~/lib/assert-patient'
+import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import prisma from '~/lib/prisma'
 
 function getActiveMedicationFilter() {
@@ -13,30 +13,10 @@ function getActiveMedicationFilter() {
   }
 }
 
-async function assertPatientUser(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId } })
-
-  if (!user) {
-    throw new HttpError('User not found.', 404)
-  }
-
-  if (user.role !== USER_ROLES.USER) {
-    throw new HttpError('Forbidden', 403)
-  }
-
-  return user
-}
-
 export async function getDashboardStats(userId: string) {
   await assertPatientUser(userId)
 
-  const [
-    medications,
-    allergies,
-    vaccinations,
-    labResults,
-    imagingResults,
-  ] = await Promise.all([
+  const [medications, allergies, vaccinations, labResults, imagingResults] = await Promise.all([
     prisma.medication.count({
       where: {
         userId,
@@ -48,6 +28,12 @@ export async function getDashboardStats(userId: string) {
     prisma.labResult.count({ where: { userId } }),
     prisma.imagingResult.count({ where: { userId } }),
   ])
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_READ,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'PatientDashboard',
+  })
 
   return {
     counts: {

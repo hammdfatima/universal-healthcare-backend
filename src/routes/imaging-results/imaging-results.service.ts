@@ -1,8 +1,10 @@
-import { USER_ROLES } from '~/config/roles'
 import type { ImagingResult } from '~/generated/prisma'
+import { assertPatientUser } from '~/lib/assert-patient'
+import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { deleteCloudinaryFile } from '~/lib/cloudinary'
 import { HttpError } from '~/lib/error'
 import { notifyImagingResultUploaded } from '~/lib/notifications'
+import { decryptPhi, encryptPhiRequired } from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 
 type ImagingResultInput = {
@@ -58,16 +60,8 @@ function parseImagingDate(value: string, fieldLabel: string): Date {
 
 function assertScanDateNotInFuture(scanDate: Date) {
   const today = new Date()
-  const todayUtc = Date.UTC(
-    today.getUTCFullYear(),
-    today.getUTCMonth(),
-    today.getUTCDate()
-  )
-  const scanUtc = Date.UTC(
-    scanDate.getUTCFullYear(),
-    scanDate.getUTCMonth(),
-    scanDate.getUTCDate()
-  )
+  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())
+  const scanUtc = Date.UTC(scanDate.getUTCFullYear(), scanDate.getUTCMonth(), scanDate.getUTCDate())
 
   if (scanUtc > todayUtc) {
     throw new HttpError('Scan date cannot be in the future.', 400)
@@ -85,31 +79,17 @@ function assertOwnedFile(userId: string, publicId: string) {
 function toImagingResultResponse(record: ImagingResult) {
   return {
     id: record.id,
-    fileName: record.fileName,
-    testType: record.testType,
-    scanType: record.scanType,
+    fileName: decryptPhi(record.fileName),
+    testType: decryptPhi(record.testType),
+    scanType: decryptPhi(record.scanType),
     scanDate: formatImagingDate(record.scanDate),
-    fileUrl: record.fileUrl,
-    filePublicId: record.filePublicId,
+    fileUrl: decryptPhi(record.fileUrl),
+    filePublicId: decryptPhi(record.filePublicId),
     fileMimeType: record.fileMimeType,
     fileResourceType: record.fileResourceType,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
   }
-}
-
-async function assertPatientUser(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId } })
-
-  if (!user) {
-    throw new HttpError('User not found.', 404)
-  }
-
-  if (user.role !== USER_ROLES.USER) {
-    throw new HttpError('Forbidden', 403)
-  }
-
-  return user
 }
 
 async function getOwnedImagingResult(userId: string, imagingResultId: string) {
@@ -131,7 +111,7 @@ async function deleteImagingResultFile(record: ImagingResult) {
   const resourceType = (record.fileResourceType ?? 'image') as CloudinaryResourceType
 
   try {
-    await deleteCloudinaryFile(record.filePublicId, resourceType)
+    await deleteCloudinaryFile(decryptPhi(record.filePublicId), resourceType)
   } catch {
     // File may already be removed from Cloudinary.
   }
@@ -163,6 +143,12 @@ export async function listImagingResults(userId: string) {
     where: { userId },
     orderBy: { scanDate: 'desc' },
   })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_READ,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'ImagingResult',
+  })
 
   return {
     imagingResults: imagingResults.map(toImagingResultResponse),
@@ -172,16 +158,30 @@ export async function listImagingResults(userId: string) {
 export async function createImagingResult(userId: string, input: ImagingResultInput) {
   await assertPatientUser(userId)
 
-  const data = normalizeInput(input, userId)
+  const plaintext = normalizeInput(input, userId)
 
   const record = await prisma.imagingResult.create({
     data: {
       userId,
-      ...data,
+      ...plaintext,
+      fileName: encryptPhiRequired(plaintext.fileName),
+      testType: encryptPhiRequired(plaintext.testType),
+      scanType: encryptPhiRequired(plaintext.scanType),
+      fileUrl: encryptPhiRequired(plaintext.fileUrl),
+      filePublicId: encryptPhiRequired(plaintext.filePublicId),
     },
   })
 
-  await notifyImagingResultUploaded(userId, record)
+  await Promise.all([
+    notifyImagingResultUploaded(userId, toImagingResultResponse(record)),
+    writeAuditLog({
+      action: AUDIT_ACTIONS.PHI_CREATE,
+      actorUserId: userId,
+      patientUserId: userId,
+      resourceType: 'ImagingResult',
+      resourceId: record.id,
+    }),
+  ])
 
   return toImagingResultResponse(record)
 }
@@ -194,15 +194,29 @@ export async function updateImagingResult(
   await assertPatientUser(userId)
 
   const existing = await getOwnedImagingResult(userId, imagingResultId)
-  const data = normalizeInput(input, userId)
+  const plaintext = normalizeInput(input, userId)
 
-  if (existing.filePublicId !== data.filePublicId) {
+  if (decryptPhi(existing.filePublicId) !== plaintext.filePublicId) {
     await deleteImagingResultFile(existing)
   }
 
   const record = await prisma.imagingResult.update({
     where: { id: imagingResultId },
-    data,
+    data: {
+      ...plaintext,
+      fileName: encryptPhiRequired(plaintext.fileName),
+      testType: encryptPhiRequired(plaintext.testType),
+      scanType: encryptPhiRequired(plaintext.scanType),
+      fileUrl: encryptPhiRequired(plaintext.fileUrl),
+      filePublicId: encryptPhiRequired(plaintext.filePublicId),
+    },
+  })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_UPDATE,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'ImagingResult',
+    resourceId: record.id,
   })
 
   return toImagingResultResponse(record)
@@ -217,5 +231,12 @@ export async function deleteImagingResult(userId: string, imagingResultId: strin
 
   await prisma.imagingResult.delete({
     where: { id: imagingResultId },
+  })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_DELETE,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'ImagingResult',
+    resourceId: imagingResultId,
   })
 }

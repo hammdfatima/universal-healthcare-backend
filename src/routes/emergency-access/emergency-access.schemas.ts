@@ -6,6 +6,7 @@ export const emergencyAccessTokenSchema = z
     token: z.string(),
     accessUrl: z.string(),
     isActive: z.boolean(),
+    expiresAt: z.string(),
     createdAt: z.string(),
     updatedAt: z.string(),
     lastAccessedAt: z.string().nullable(),
@@ -24,6 +25,32 @@ export const emergencyAccessTokenParamSchema = z
     token: z.string().min(1).openapi({ example: 'abc123def456' }),
   })
   .openapi('EmergencyAccessTokenParam')
+
+export const generateEmergencyAccessBodySchema = z
+  .object({
+    pin: z
+      .string()
+      .regex(/^\d{4,8}$/, 'PIN must be 4 to 8 digits')
+      .openapi({ example: '482915' }),
+  })
+  .openapi('GenerateEmergencyAccessBody')
+
+export const unlockEmergencyAccessBodySchema = z
+  .object({
+    pin: z
+      .string()
+      .regex(/^\d{4,8}$/, 'PIN must be 4 to 8 digits')
+      .openapi({ example: '482915' }),
+  })
+  .openapi('UnlockEmergencyAccessBody')
+
+export const publicEmergencyChallengeSchema = z
+  .object({
+    needsPin: z.literal(true),
+    patientInitials: z.string(),
+    expiresAt: z.string(),
+  })
+  .openapi('PublicEmergencyChallenge')
 
 export const publicEmergencyRecordsSchema = patientDataExportSchema
   .extend({

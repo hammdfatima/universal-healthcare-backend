@@ -2,6 +2,7 @@ import { API_START_POINT } from '~/config/constants'
 import emergencyAccessRouter from '~/routes/emergency-access'
 import adminDashboardRouter from '~/routes/admin-dashboard'
 import adminPaymentsRouter from '~/routes/admin-payments'
+import adminAuditLogsRouter from '~/routes/admin-audit-logs'
 import adminProfileRouter from '~/routes/admin-profile'
 import authRouter from '~/routes/auth'
 import filesRouter from '~/routes/files'
@@ -21,16 +22,17 @@ import subscriptionsRouter from '~/routes/subscriptions'
 import subscriptionPlansRouter from '~/routes/subscription-plans'
 import usersRouter from '~/routes/users'
 import userQueriesRouter from '~/routes/user-queries'
-import router from '~/routes/test'
+import testRouter from '~/routes/test'
 import type { AppOpenAPI } from '~/types'
 
 export function registerRoutes(app: AppOpenAPI) {
-  return app
+  const registered = app
     .route(API_START_POINT, authRouter)
     .route(API_START_POINT, subscriptionPlansRouter)
     .route(API_START_POINT, usersRouter)
     .route(API_START_POINT, adminDashboardRouter)
     .route(API_START_POINT, adminPaymentsRouter)
+    .route(API_START_POINT, adminAuditLogsRouter)
     .route(API_START_POINT, userQueriesRouter)
     .route(API_START_POINT, adminProfileRouter)
     .route(API_START_POINT, filesRouter)
@@ -48,5 +50,10 @@ export function registerRoutes(app: AppOpenAPI) {
     .route(API_START_POINT, patientSettingsRouter)
     .route(API_START_POINT, emergencyAccessRouter)
     .route(API_START_POINT, subscriptionsRouter)
-    .route('/test', router)
+
+  if (Bun.env.NODE_ENV !== 'production') {
+    return registered.route('/test', testRouter)
+  }
+
+  return registered
 }

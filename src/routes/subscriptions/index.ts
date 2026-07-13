@@ -1,5 +1,5 @@
 import { createRouter } from '~/lib/create-app'
-import { requireAuth } from '~/middleware/require-admin'
+import { requirePatient } from '~/middleware/require-admin'
 import {
   stripeWebhookHandler,
   SUBSCRIPTION_ROUTE_HANDLER,
@@ -10,11 +10,11 @@ const router = createRouter()
 
 router.post('/subscriptions/webhook', stripeWebhookHandler)
 
-router.use('/subscriptions/me', requireAuth)
-router.use('/subscriptions/checkout', requireAuth)
-router.use('/subscriptions/checkout/*', requireAuth)
-router.use('/subscriptions/cancel', requireAuth)
-router.use('/subscriptions/change-plan', requireAuth)
+router.use('/subscriptions/me', requirePatient)
+router.use('/subscriptions/checkout', requirePatient)
+router.use('/subscriptions/checkout/*', requirePatient)
+router.use('/subscriptions/cancel', requirePatient)
+router.use('/subscriptions/change-plan', requirePatient)
 
 router
   .openapi(SUBSCRIPTION_ROUTES.getMe, SUBSCRIPTION_ROUTE_HANDLER.getMe)

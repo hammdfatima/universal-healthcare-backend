@@ -1,7 +1,9 @@
-import { USER_ROLES } from '~/config/roles'
 import type { Vaccination } from '~/generated/prisma'
+import { assertPatientUser } from '~/lib/assert-patient'
+import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { HttpError } from '~/lib/error'
 import { notifyVaccinationAdded } from '~/lib/notifications'
+import { decryptPhi, encryptPhiRequired } from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 
 type VaccinationInput = {
@@ -79,7 +81,9 @@ function formatVaccinationTime(value: string): string {
 
     const period = hour24 >= 12 ? 'PM' : 'AM'
     let hour12 = hour24 % 12
-    if (hour12 === 0) hour12 = 12
+    if (hour12 === 0) {
+      hour12 = 12
+    }
 
     return `${hour12}:${minute} ${period}`
   }
@@ -90,29 +94,15 @@ function formatVaccinationTime(value: string): string {
 function toVaccinationResponse(record: Vaccination) {
   return {
     id: record.id,
-    vaccineName: record.vaccineName,
-    prescribedBy: record.prescribedBy,
-    administeredBy: record.administeredBy,
-    dosage: record.dosage,
+    vaccineName: decryptPhi(record.vaccineName),
+    prescribedBy: decryptPhi(record.prescribedBy),
+    administeredBy: decryptPhi(record.administeredBy),
+    dosage: decryptPhi(record.dosage),
     date: formatVaccinationDate(record.vaccinationDate),
-    time: record.time,
+    time: decryptPhi(record.time),
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
   }
-}
-
-async function assertPatientUser(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId } })
-
-  if (!user) {
-    throw new HttpError('User not found.', 404)
-  }
-
-  if (user.role !== USER_ROLES.USER) {
-    throw new HttpError('Forbidden', 403)
-  }
-
-  return user
 }
 
 async function getOwnedVaccination(userId: string, vaccinationId: string) {
@@ -137,6 +127,12 @@ export async function listVaccinations(userId: string) {
     where: { userId },
     orderBy: { vaccinationDate: 'desc' },
   })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_READ,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'Vaccination',
+  })
 
   return {
     vaccinations: vaccinations.map(toVaccinationResponse),
@@ -149,16 +145,25 @@ export async function createVaccination(userId: string, input: VaccinationInput)
   const record = await prisma.vaccination.create({
     data: {
       userId,
-      vaccineName: input.vaccineName.trim(),
-      prescribedBy: input.prescribedBy.trim(),
-      administeredBy: input.administeredBy.trim(),
-      dosage: input.dosage.trim(),
+      vaccineName: encryptPhiRequired(input.vaccineName.trim()),
+      prescribedBy: encryptPhiRequired(input.prescribedBy.trim()),
+      administeredBy: encryptPhiRequired(input.administeredBy.trim()),
+      dosage: encryptPhiRequired(input.dosage.trim()),
       vaccinationDate: parseVaccinationDate(input.date, 'date'),
-      time: formatVaccinationTime(input.time),
+      time: encryptPhiRequired(formatVaccinationTime(input.time)),
     },
   })
 
-  await notifyVaccinationAdded(userId, record)
+  await Promise.all([
+    notifyVaccinationAdded(userId, toVaccinationResponse(record)),
+    writeAuditLog({
+      action: AUDIT_ACTIONS.PHI_CREATE,
+      actorUserId: userId,
+      patientUserId: userId,
+      resourceType: 'Vaccination',
+      resourceId: record.id,
+    }),
+  ])
 
   return toVaccinationResponse(record)
 }
@@ -174,13 +179,20 @@ export async function updateVaccination(
   const record = await prisma.vaccination.update({
     where: { id: vaccinationId },
     data: {
-      vaccineName: input.vaccineName.trim(),
-      prescribedBy: input.prescribedBy.trim(),
-      administeredBy: input.administeredBy.trim(),
-      dosage: input.dosage.trim(),
+      vaccineName: encryptPhiRequired(input.vaccineName.trim()),
+      prescribedBy: encryptPhiRequired(input.prescribedBy.trim()),
+      administeredBy: encryptPhiRequired(input.administeredBy.trim()),
+      dosage: encryptPhiRequired(input.dosage.trim()),
       vaccinationDate: parseVaccinationDate(input.date, 'date'),
-      time: formatVaccinationTime(input.time),
+      time: encryptPhiRequired(formatVaccinationTime(input.time)),
     },
+  })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_UPDATE,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'Vaccination',
+    resourceId: record.id,
   })
 
   return toVaccinationResponse(record)
@@ -192,5 +204,12 @@ export async function deleteVaccination(userId: string, vaccinationId: string) {
 
   await prisma.vaccination.delete({
     where: { id: vaccinationId },
+  })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_DELETE,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'Vaccination',
+    resourceId: vaccinationId,
   })
 }

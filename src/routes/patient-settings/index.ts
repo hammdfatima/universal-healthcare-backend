@@ -1,12 +1,12 @@
 import { createRouter } from '~/lib/create-app'
-import { requireAuth } from '~/middleware/require-admin'
+import { requirePatient } from '~/middleware/require-admin'
 import { PATIENT_SETTINGS_ROUTE_HANDLER } from '~/routes/patient-settings/patient-settings.handler'
 import { PATIENT_SETTINGS_ROUTES } from '~/routes/patient-settings/patient-settings.routes'
 
 const router = createRouter()
 
-router.use('/settings', requireAuth)
-router.use('/settings/*', requireAuth)
+router.use('/settings', requirePatient)
+router.use('/settings/*', requirePatient)
 
 router
   .openapi(

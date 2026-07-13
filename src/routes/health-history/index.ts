@@ -1,12 +1,12 @@
 import { createRouter } from '~/lib/create-app'
-import { requireAuth } from '~/middleware/require-admin'
+import { requirePatient } from '~/middleware/require-admin'
 import { HEALTH_HISTORY_ROUTE_HANDLER } from '~/routes/health-history/health-history.handler'
 import { HEALTH_HISTORY_ROUTES } from '~/routes/health-history/health-history.routes'
 
 const router = createRouter()
 
-router.use('/health-history', requireAuth)
-router.use('/health-history/*', requireAuth)
+router.use('/health-history', requirePatient)
+router.use('/health-history/*', requirePatient)
 
 router
   .openapi(

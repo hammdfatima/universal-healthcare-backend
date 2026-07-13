@@ -63,7 +63,19 @@ configureOpenAPI(app)
 console.log('API reference available at http://localhost:8080/reference')
 
 export default {
-  fetch: app.fetch,
+  async fetch(request: Request, server: Bun.Server) {
+    const headers = new Headers(request.headers)
+
+    if (!headers.get('x-forwarded-for') && !headers.get('x-real-ip')) {
+      const remote = server.requestIP(request)
+      if (remote?.address) {
+        headers.set('x-real-ip', remote.address)
+      }
+    }
+
+    const enrichedRequest = new Request(request, { headers })
+    return app.fetch(enrichedRequest, server)
+  },
   port: Number(Bun.env.PORT_NO ?? Bun.env.PORT ?? 8080),
   hostname: '0.0.0.0',
 }

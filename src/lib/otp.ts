@@ -1,7 +1,12 @@
+import { createHash, randomInt } from 'node:crypto'
 import { PASSWORD_RESET_AND_OTP_EXPIRY_MINUTES } from '~/lib/auth'
 
 export function generateOtpCode() {
-  return String(Math.floor(100000 + Math.random() * 900000))
+  return String(randomInt(100000, 1000000))
+}
+
+export function hashOtpCode(code: string) {
+  return createHash('sha256').update(code).digest('hex')
 }
 
 export function getOtpExpiryDate() {

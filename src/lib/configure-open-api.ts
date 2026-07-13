@@ -1,7 +1,19 @@
 import { Scalar } from '@scalar/hono-api-reference'
 import type { AppOpenAPI } from '~/types'
 
+function shouldEnableApiDocs() {
+  if (Bun.env.ENABLE_API_DOCS === 'true') {
+    return true
+  }
+
+  return Bun.env.NODE_ENV !== 'production'
+}
+
 export default function configureOpenAPI(app: AppOpenAPI) {
+  if (!shouldEnableApiDocs()) {
+    return
+  }
+
   app.doc('/doc', {
     openapi: '3.0.0',
     info: {
@@ -22,31 +34,20 @@ export default function configureOpenAPI(app: AppOpenAPI) {
   app.get(
     '/reference',
     Scalar({
-      // Theme and Layout - Enhanced for better UX
       theme: 'kepler',
       layout: 'modern',
-
-      // OpenAPI specification URL
       url: '/doc',
-
-      // UI Customization for better developer experience
       showSidebar: true,
       hideModels: true,
       hideDownloadButton: false,
       hideTestRequestButton: false,
-
-      // Search functionality with hotkey
       searchHotKey: 'k',
       hiddenClients: true,
       hideClientButton: true,
-
-      // HTTP Client Configuration - Use supported values
       defaultHttpClient: {
         targetKey: 'js',
         clientKey: 'fetch',
       },
-
-      // Authentication configuration
       authentication: {
         preferredSecurityScheme: 'bearerAuth',
       },

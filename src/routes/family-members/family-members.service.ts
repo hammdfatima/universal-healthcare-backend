@@ -1,14 +1,17 @@
 import { USER_ROLES } from '~/config/roles'
 import type { FamilyMember, User } from '~/generated/prisma'
-import { HttpError } from '~/lib/error'
-import {
-  getFamilyMemberLimit,
-  getPlanTier,
-  supportsFamilyMembers,
-} from '~/lib/plan-tier'
-import { hashPassword } from '~/lib/password'
-import prisma from '~/lib/prisma'
+import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { sendFamilyMemberWelcomeEmail } from '~/lib/email'
+import { HttpError } from '~/lib/error'
+import { hashPassword } from '~/lib/password'
+import {
+  decryptDateNullable,
+  decryptPhiNullable,
+  encryptDateToPhi,
+  encryptPhiRequired,
+} from '~/lib/phi-crypto'
+import { getFamilyMemberLimit, getPlanTier, supportsFamilyMembers } from '~/lib/plan-tier'
+import prisma from '~/lib/prisma'
 import { isSubscriptionActive } from '~/routes/subscriptions/subscriptions.service'
 
 type CreateFamilyMemberInput = {
@@ -81,12 +84,12 @@ function toFamilyMemberResponse(
   return {
     id: record.id,
     memberUserId: record.memberUserId,
-    firstName: record.memberUser.firstName ?? '',
-    lastName: record.memberUser.lastName ?? '',
+    firstName: decryptPhiNullable(record.memberUser.firstName) ?? '',
+    lastName: decryptPhiNullable(record.memberUser.lastName) ?? '',
     email: record.memberUser.email,
-    phone: record.memberUser.phone,
+    phone: decryptPhiNullable(record.memberUser.phone),
     relationship: record.relationship,
-    dateOfBirth: formatDateOfBirth(record.memberUser.dateOfBirth),
+    dateOfBirth: formatDateOfBirth(decryptDateNullable(record.memberUser.dateOfBirth)),
     isEmergencyContact: record.isEmergencyContact,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
@@ -167,6 +170,12 @@ export async function listFamilyMembers(ownerId: string) {
     include: { memberUser: true },
     orderBy: { createdAt: 'asc' },
   })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_READ,
+    actorUserId: ownerId,
+    patientUserId: ownerId,
+    resourceType: 'FamilyMemberProfile',
+  })
 
   return {
     members: members.map(toFamilyMemberResponse),
@@ -179,7 +188,7 @@ export async function createFamilyMember(ownerId: string, input: CreateFamilyMem
   const { tier, limit, subscription } = assertOwnerCanManageFamily(owner)
 
   if (tier === 'couple' && input.relationship.trim() !== 'Spouse') {
-    throw new HttpError("Couple plans can only add a spouse profile.", 400)
+    throw new HttpError('Couple plans can only add a spouse profile.', 400)
   }
 
   const existingCount = await prisma.familyMember.count({
@@ -212,11 +221,11 @@ export async function createFamilyMember(ownerId: string, input: CreateFamilyMem
     const memberUser = await tx.user.create({
       data: {
         email,
-        firstName,
-        lastName,
-        name: `${firstName} ${lastName}`.trim(),
-        phone: input.phone.trim(),
-        dateOfBirth,
+        firstName: encryptPhiRequired(firstName),
+        lastName: encryptPhiRequired(lastName),
+        name: encryptPhiRequired(`${firstName} ${lastName}`.trim()),
+        phone: encryptPhiRequired(input.phone.trim()),
+        dateOfBirth: encryptDateToPhi(dateOfBirth),
         password: passwordHash,
         emailVerified: true,
         onboardingCompleted: true,
@@ -256,6 +265,13 @@ export async function createFamilyMember(ownerId: string, input: CreateFamilyMem
     email,
     password: input.password,
   })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_CREATE,
+    actorUserId: ownerId,
+    patientUserId: record.memberUserId,
+    resourceType: 'FamilyMemberProfile',
+    resourceId: record.id,
+  })
 
   return toFamilyMemberResponse(record)
 }
@@ -270,7 +286,7 @@ export async function updateFamilyMember(
   const record = await getOwnedFamilyMember(ownerId, familyMemberId)
 
   if (tier === 'couple' && input.relationship.trim() !== 'Spouse') {
-    throw new HttpError("Couple plans can only manage a spouse profile.", 400)
+    throw new HttpError('Couple plans can only manage a spouse profile.', 400)
   }
 
   const firstName = input.firstName.trim()
@@ -281,11 +297,11 @@ export async function updateFamilyMember(
     await tx.user.update({
       where: { id: record.memberUserId },
       data: {
-        firstName,
-        lastName,
-        name: `${firstName} ${lastName}`.trim(),
-        phone: input.phone.trim(),
-        dateOfBirth,
+        firstName: encryptPhiRequired(firstName),
+        lastName: encryptPhiRequired(lastName),
+        name: encryptPhiRequired(`${firstName} ${lastName}`.trim()),
+        phone: encryptPhiRequired(input.phone.trim()),
+        dateOfBirth: encryptDateToPhi(dateOfBirth),
       },
     })
 
@@ -300,6 +316,13 @@ export async function updateFamilyMember(
       },
     })
   })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_UPDATE,
+    actorUserId: ownerId,
+    patientUserId: record.memberUserId,
+    resourceType: 'FamilyMemberProfile',
+    resourceId: record.id,
+  })
 
   return toFamilyMemberResponse(updated)
 }
@@ -312,5 +335,12 @@ export async function deleteFamilyMember(ownerId: string, familyMemberId: string
 
   await prisma.familyMember.delete({
     where: { id: record.id },
+  })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_DELETE,
+    actorUserId: ownerId,
+    patientUserId: record.memberUserId,
+    resourceType: 'FamilyMemberProfile',
+    resourceId: record.id,
   })
 }

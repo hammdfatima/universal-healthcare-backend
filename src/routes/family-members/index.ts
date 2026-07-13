@@ -1,12 +1,12 @@
 import { createRouter } from '~/lib/create-app'
-import { requireAuth } from '~/middleware/require-admin'
+import { requirePatient } from '~/middleware/require-admin'
 import { FAMILY_MEMBERS_ROUTE_HANDLER } from '~/routes/family-members/family-members.handler'
 import { FAMILY_MEMBERS_ROUTES } from '~/routes/family-members/family-members.routes'
 
 const router = createRouter()
 
-router.use('/family-members', requireAuth)
-router.use('/family-members/*', requireAuth)
+router.use('/family-members', requirePatient)
+router.use('/family-members/*', requirePatient)
 
 router
   .openapi(

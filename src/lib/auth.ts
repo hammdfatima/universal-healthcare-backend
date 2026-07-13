@@ -22,6 +22,13 @@ export type PasswordResetJwtPayload = IPayload & {
   token_use: typeof RESET_JWT_MARKER
 }
 
+const MFA_PENDING_MARKER = 'mfa_pending' as const
+export const MFA_PENDING_EXPIRY_SECONDS = 5 * 60
+
+export type MfaPendingJwtPayload = IPayload & {
+  token_use: typeof MFA_PENDING_MARKER
+}
+
 export function signAccessToken(payload: IPayload) {
   if (!JWT_SECRET) {
     throw new Error('JWT_SECRET is not configured')
@@ -29,6 +36,16 @@ export function signAccessToken(payload: IPayload) {
 
   return sign(payload, JWT_SECRET, {
     expiresIn: ACCESS_TOKEN_EXPIRY_SECONDS,
+  })
+}
+
+export function signMfaPendingToken(payload: IPayload) {
+  if (!JWT_SECRET) {
+    throw new Error('JWT_SECRET is not configured')
+  }
+
+  return sign({ ...payload, token_use: MFA_PENDING_MARKER }, JWT_SECRET, {
+    expiresIn: MFA_PENDING_EXPIRY_SECONDS,
   })
 }
 
@@ -49,7 +66,27 @@ export function verifyAccessToken(token: string): IPayload | null {
   }
 
   try {
-    return verify(token, JWT_SECRET) as IPayload
+    const decoded = verify(token, JWT_SECRET) as Record<string, unknown>
+    if (decoded.token_use) {
+      return null
+    }
+    return decoded as unknown as IPayload
+  } catch {
+    return null
+  }
+}
+
+export function verifyMfaPendingToken(token: string): MfaPendingJwtPayload | null {
+  if (!JWT_SECRET) {
+    throw new Error('JWT_SECRET is not configured')
+  }
+
+  try {
+    const decoded = verify(token, JWT_SECRET) as Record<string, unknown>
+    if (decoded.token_use !== MFA_PENDING_MARKER) {
+      return null
+    }
+    return decoded as unknown as MfaPendingJwtPayload
   } catch {
     return null
   }

@@ -1,4 +1,5 @@
 import type { NotificationType } from '~/generated/prisma'
+import { decryptPhi } from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 
 type CreateNotificationInput = {
@@ -120,7 +121,7 @@ export async function syncScheduledNotifications(userId: string) {
       userId,
       type: 'medication',
       title: 'Medication reminder',
-      message: `Time to take ${medication.medicineName} (${medication.dosage}).`,
+      message: `Time to take ${decryptPhi(medication.medicineName)} (${decryptPhi(medication.dosage)}).`,
       href: '/patient/medications',
       dedupeKey: `medication:refill:${medication.id}:${todayKey}`,
     })
@@ -135,7 +136,7 @@ export async function syncScheduledNotifications(userId: string) {
         userId,
         type: 'vaccination',
         title: 'Vaccination overdue',
-        message: `Your ${vaccination.vaccineName} booster is overdue.`,
+        message: `Your ${decryptPhi(vaccination.vaccineName)} booster is overdue.`,
         href: '/patient/vaccinations',
         dedupeKey: `vaccination:overdue:${vaccination.id}`,
       })
@@ -149,7 +150,7 @@ export async function syncScheduledNotifications(userId: string) {
         userId,
         type: 'vaccination',
         title: 'Vaccination due soon',
-        message: `Your ${vaccination.vaccineName} booster is due ${dayLabel}.`,
+        message: `Your ${decryptPhi(vaccination.vaccineName)} booster is due ${dayLabel}.`,
         href: '/patient/vaccinations',
         dedupeKey: `vaccination:due:${vaccination.id}:${daysUntilDue}`,
       })

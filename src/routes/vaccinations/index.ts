@@ -1,12 +1,12 @@
 import { createRouter } from '~/lib/create-app'
-import { requireAuth } from '~/middleware/require-admin'
+import { requirePatient } from '~/middleware/require-admin'
 import { VACCINATIONS_ROUTE_HANDLER } from '~/routes/vaccinations/vaccinations.handler'
 import { VACCINATIONS_ROUTES } from '~/routes/vaccinations/vaccinations.routes'
 
 const router = createRouter()
 
-router.use('/vaccinations', requireAuth)
-router.use('/vaccinations/*', requireAuth)
+router.use('/vaccinations', requirePatient)
+router.use('/vaccinations/*', requirePatient)
 
 router
   .openapi(

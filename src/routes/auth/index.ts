@@ -6,14 +6,23 @@ import { AUTH_ROUTES } from '~/routes/auth/auth.routes'
 const router = createRouter()
   .openapi(AUTH_ROUTES.signup, AUTH_ROUTE_HANDLER.signup)
   .openapi(AUTH_ROUTES.login, AUTH_ROUTE_HANDLER.login)
+  .openapi(AUTH_ROUTES.verifyMfaLogin, AUTH_ROUTE_HANDLER.verifyMfaLogin)
   .openapi(AUTH_ROUTES.verifyEmail, AUTH_ROUTE_HANDLER.verifyEmail)
   .openapi(AUTH_ROUTES.resendVerification, AUTH_ROUTE_HANDLER.resendVerification)
   .openapi(AUTH_ROUTES.forgotPassword, AUTH_ROUTE_HANDLER.forgotPassword)
   .openapi(AUTH_ROUTES.verifyResetOtp, AUTH_ROUTE_HANDLER.verifyResetOtp)
   .openapi(AUTH_ROUTES.resetPassword, AUTH_ROUTE_HANDLER.resetPassword)
+  .openapi(AUTH_ROUTES.logout, AUTH_ROUTE_HANDLER.logout)
 
 router.use('/auth/session', requireAuth)
+router.use('/auth/mfa', requireAuth)
+router.use('/auth/mfa/*', requireAuth)
 
-router.openapi(AUTH_ROUTES.session, AUTH_ROUTE_HANDLER.session)
+router
+  .openapi(AUTH_ROUTES.session, AUTH_ROUTE_HANDLER.session)
+  .openapi(AUTH_ROUTES.getMfaStatus, AUTH_ROUTE_HANDLER.getMfaStatus)
+  .openapi(AUTH_ROUTES.setupMfa, AUTH_ROUTE_HANDLER.setupMfa)
+  .openapi(AUTH_ROUTES.enableMfa, AUTH_ROUTE_HANDLER.enableMfa)
+  .openapi(AUTH_ROUTES.disableMfa, AUTH_ROUTE_HANDLER.disableMfa)
 
 export default router

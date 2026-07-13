@@ -80,7 +80,7 @@ model User {
   phone               String?
   profileImage        String?
   gender              String?
-  dateOfBirth         DateTime?
+  dateOfBirth         String?
   bloodGroup          String?
   address             String?
   onboardingCompleted Boolean   @default(false)
@@ -94,6 +94,8 @@ model User {
   password            String
   role                Role      @default(USER)
   emailVerified       Boolean   @default(false)
+  mfaEnabled          Boolean   @default(false)
+  mfaSecret           String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -117,16 +119,39 @@ model User {
 }
 
 model EmergencyAccessToken {
-  id             String    @id @default(cuid())
-  userId         String    @unique
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  token          String    @unique
-  isActive       Boolean   @default(true)
-  lastAccessedAt DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id                String    @id @default(cuid())
+  userId            String    @unique
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token             String    @unique
+  pinHash           String
+  expiresAt         DateTime
+  failedPinAttempts Int       @default(0)
+  lockedUntil       DateTime?
+  isActive          Boolean   @default(true)
+  lastAccessedAt    DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   @@index([token])
+}
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  actorUserId   String?
+  actorRole     String?
+  action        String
+  resourceType  String
+  resourceId    String?
+  patientUserId String?
+  ip            String?
+  userAgent     String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([patientUserId])
+  @@index([action])
+  @@index([resourceType])
 }
 
 model UserSubscription {

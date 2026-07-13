@@ -4,8 +4,9 @@ import type { EMERGENCY_ACCESS_ROUTES } from '~/routes/emergency-access/emergenc
 import {
   generateEmergencyAccess,
   getEmergencyAccessStatus,
-  getPublicEmergencyRecords,
+  getPublicEmergencyChallenge,
   revokeEmergencyAccess,
+  unlockPublicEmergencyRecords,
 } from '~/routes/emergency-access/emergency-access.service'
 import type { HandlerMapFromRoutes } from '~/types'
 
@@ -43,7 +44,8 @@ export const EMERGENCY_ACCESS_ROUTE_HANDLER: HandlerMapFromRoutes<
       throw new HttpError('Unauthorized', 401)
     }
 
-    const access = await generateEmergencyAccess(authUser.user_id, getAppUrl())
+    const { pin } = c.req.valid('json')
+    const access = await generateEmergencyAccess(authUser.user_id, getAppUrl(), pin)
 
     return c.json(
       {
@@ -74,14 +76,32 @@ export const EMERGENCY_ACCESS_ROUTE_HANDLER: HandlerMapFromRoutes<
     )
   },
 
-  getPublicRecords: async c => {
+  getPublicChallenge: async c => {
     const { token } = c.req.valid('param')
-    const records = await getPublicEmergencyRecords(token)
+    const challenge = await getPublicEmergencyChallenge(token)
 
     return c.json(
       {
         success: true,
-        message: 'Emergency medical records fetched successfully.',
+        message: 'Emergency access challenge fetched successfully.',
+        data: challenge,
+      },
+      HttpStatusCodes.OK
+    )
+  },
+
+  unlockPublicRecords: async c => {
+    const { token } = c.req.valid('param')
+    const { pin } = c.req.valid('json')
+    const records = await unlockPublicEmergencyRecords(token, pin, {
+      ip: c.req.header('x-forwarded-for') ?? c.req.header('x-real-ip') ?? null,
+      userAgent: c.req.header('user-agent') ?? null,
+    })
+
+    return c.json(
+      {
+        success: true,
+        message: 'Emergency medical records unlocked successfully.',
         data: records,
       },
       HttpStatusCodes.OK

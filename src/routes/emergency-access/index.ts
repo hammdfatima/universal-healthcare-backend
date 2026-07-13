@@ -1,17 +1,22 @@
 import { createRouter } from '~/lib/create-app'
-import { requireAuth } from '~/middleware/require-admin'
+import { requirePatient } from '~/middleware/require-admin'
 import { EMERGENCY_ACCESS_ROUTE_HANDLER } from '~/routes/emergency-access/emergency-access.handler'
 import { EMERGENCY_ACCESS_ROUTES } from '~/routes/emergency-access/emergency-access.routes'
 
 const router = createRouter()
 
-router.openapi(
-  EMERGENCY_ACCESS_ROUTES.getPublicRecords,
-  EMERGENCY_ACCESS_ROUTE_HANDLER.getPublicRecords
-)
+router
+  .openapi(
+    EMERGENCY_ACCESS_ROUTES.getPublicChallenge,
+    EMERGENCY_ACCESS_ROUTE_HANDLER.getPublicChallenge
+  )
+  .openapi(
+    EMERGENCY_ACCESS_ROUTES.unlockPublicRecords,
+    EMERGENCY_ACCESS_ROUTE_HANDLER.unlockPublicRecords
+  )
 
-router.use('/emergency-access', requireAuth)
-router.use('/emergency-access/*', requireAuth)
+router.use('/emergency-access', requirePatient)
+router.use('/emergency-access/*', requirePatient)
 
 router
   .openapi(

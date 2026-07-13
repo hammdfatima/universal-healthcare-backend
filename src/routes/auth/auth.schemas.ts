@@ -9,6 +9,7 @@ export const signupBodySchema = z
     email: z.email().openapi({ example: 'john@example.com' }),
     password: strongPasswordSchema.openapi({ example: 'Password1!' }),
   })
+  .strict()
   .openapi('SignupBody')
 
 export const loginBodySchema = z
@@ -45,6 +46,35 @@ export const resetPasswordBodySchema = z
   })
   .openapi('ResetPasswordBody')
 
+export const verifyMfaLoginBodySchema = z
+  .object({
+    mfaToken: z.string().min(1),
+    code: z
+      .string()
+      .regex(/^\d{6}$/, 'Authenticator code must be 6 digits')
+      .openapi({ example: '123456' }),
+  })
+  .openapi('VerifyMfaLoginBody')
+
+export const enableMfaBodySchema = z
+  .object({
+    code: z
+      .string()
+      .regex(/^\d{6}$/, 'Authenticator code must be 6 digits')
+      .openapi({ example: '123456' }),
+  })
+  .openapi('EnableMfaBody')
+
+export const disableMfaBodySchema = z
+  .object({
+    code: z
+      .string()
+      .regex(/^\d{6}$/, 'Authenticator code must be 6 digits')
+      .openapi({ example: '123456' }),
+    password: z.string().min(8),
+  })
+  .openapi('DisableMfaBody')
+
 export const authUserSchema = z
   .object({
     id: z.string(),
@@ -57,15 +87,54 @@ export const authUserSchema = z
     emailVerified: z.boolean(),
     mustChangePassword: z.boolean(),
     isFamilyMemberAccount: z.boolean(),
+    mfaEnabled: z.boolean(),
   })
   .openapi('AuthUser')
 
-export const authTokenResponseSchema = z
+export const signupAuthUserSchema = authUserSchema
+  .omit({ role: true })
+  .extend({
+    role: z.literal(USER_ROLES.USER),
+  })
+  .openapi('SignupAuthUser')
+
+export const sessionUserResponseSchema = z
   .object({
-    token: z.string(),
+    mfaRequired: z.literal(false),
     user: authUserSchema,
   })
-  .openapi('AuthTokenResponse')
+  .openapi('SessionUserResponse')
+
+export const signupSessionUserResponseSchema = z
+  .object({
+    mfaRequired: z.literal(false),
+    user: signupAuthUserSchema,
+  })
+  .openapi('SignupSessionUserResponse')
+
+export const mfaChallengeResponseSchema = z
+  .object({
+    mfaRequired: z.literal(true),
+    mfaToken: z.string(),
+  })
+  .openapi('MfaChallengeResponse')
+
+export const loginResponseSchema = z
+  .union([sessionUserResponseSchema, mfaChallengeResponseSchema])
+  .openapi('LoginResponse')
+
+export const mfaStatusSchema = z
+  .object({
+    mfaEnabled: z.boolean(),
+  })
+  .openapi('MfaStatus')
+
+export const mfaSetupSchema = z
+  .object({
+    secret: z.string(),
+    otpauthUrl: z.string(),
+  })
+  .openapi('MfaSetup')
 
 export const resetTokenResponseSchema = z
   .object({
@@ -82,5 +151,6 @@ export const messageResponseSchema = z
 export const sessionResponseSchema = z
   .object({
     valid: z.literal(true),
+    user: authUserSchema,
   })
   .openapi('SessionResponse')

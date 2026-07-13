@@ -1,12 +1,12 @@
 import { createRouter } from '~/lib/create-app'
-import { requireAuth } from '~/middleware/require-admin'
+import { requirePatient } from '~/middleware/require-admin'
 import { CARE_PROVIDERS_ROUTE_HANDLER } from '~/routes/care-providers/care-providers.handler'
 import { CARE_PROVIDERS_ROUTES } from '~/routes/care-providers/care-providers.routes'
 
 const router = createRouter()
 
-router.use('/care-providers', requireAuth)
-router.use('/care-providers/*', requireAuth)
+router.use('/care-providers', requirePatient)
+router.use('/care-providers/*', requirePatient)
 
 router
   .openapi(

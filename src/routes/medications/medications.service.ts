@@ -1,10 +1,9 @@
-import { USER_ROLES } from '~/config/roles'
 import type { Medication } from '~/generated/prisma'
+import { assertPatientUser } from '~/lib/assert-patient'
+import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { HttpError } from '~/lib/error'
-import {
-  notifyMedicationAdded,
-  notifyMedicationDiscontinued,
-} from '~/lib/notifications'
+import { notifyMedicationAdded, notifyMedicationDiscontinued } from '~/lib/notifications'
+import { decryptPhi, encryptPhiRequired } from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 
 type MedicationInput = {
@@ -54,10 +53,7 @@ function parseMedicationDate(value: string, fieldLabel: string): Date {
   return parsed
 }
 
-function parseOptionalMedicationDate(
-  value: string | undefined,
-  fieldLabel: string
-): Date | null {
+function parseOptionalMedicationDate(value: string | undefined, fieldLabel: string): Date | null {
   if (!value?.trim()) {
     return null
   }
@@ -68,29 +64,15 @@ function parseOptionalMedicationDate(
 function toMedicationResponse(record: Medication) {
   return {
     id: record.id,
-    medicineName: record.medicineName,
-    condition: record.condition,
-    prescribedBy: record.prescribedBy,
-    dosage: record.dosage,
+    medicineName: decryptPhi(record.medicineName),
+    condition: decryptPhi(record.condition),
+    prescribedBy: decryptPhi(record.prescribedBy),
+    dosage: decryptPhi(record.dosage),
     startDate: formatMedicationDate(record.startDate),
     endDate: record.endDate ? formatMedicationDate(record.endDate) : null,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
   }
-}
-
-async function assertPatientUser(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId } })
-
-  if (!user) {
-    throw new HttpError('User not found.', 404)
-  }
-
-  if (user.role !== USER_ROLES.USER) {
-    throw new HttpError('Forbidden', 403)
-  }
-
-  return user
 }
 
 async function getOwnedMedication(userId: string, medicationId: string) {
@@ -115,6 +97,12 @@ export async function listMedications(userId: string) {
     where: { userId },
     orderBy: { createdAt: 'desc' },
   })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_READ,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'Medication',
+  })
 
   return {
     medications: medications.map(toMedicationResponse),
@@ -134,16 +122,25 @@ export async function createMedication(userId: string, input: MedicationInput) {
   const record = await prisma.medication.create({
     data: {
       userId,
-      medicineName: input.medicineName.trim(),
-      condition: input.condition.trim(),
-      prescribedBy: input.prescribedBy.trim(),
-      dosage: input.dosage.trim(),
+      medicineName: encryptPhiRequired(input.medicineName.trim()),
+      condition: encryptPhiRequired(input.condition.trim()),
+      prescribedBy: encryptPhiRequired(input.prescribedBy.trim()),
+      dosage: encryptPhiRequired(input.dosage.trim()),
       startDate,
       endDate,
     },
   })
 
-  await notifyMedicationAdded(userId, record)
+  await Promise.all([
+    notifyMedicationAdded(userId, toMedicationResponse(record)),
+    writeAuditLog({
+      action: AUDIT_ACTIONS.PHI_CREATE,
+      actorUserId: userId,
+      patientUserId: userId,
+      resourceType: 'Medication',
+      resourceId: record.id,
+    }),
+  ])
 
   return toMedicationResponse(record)
 }
@@ -166,28 +163,31 @@ export async function updateMedication(
   const record = await prisma.medication.update({
     where: { id: medicationId },
     data: {
-      medicineName: input.medicineName.trim(),
-      condition: input.condition.trim(),
-      prescribedBy: input.prescribedBy.trim(),
-      dosage: input.dosage.trim(),
+      medicineName: encryptPhiRequired(input.medicineName.trim()),
+      condition: encryptPhiRequired(input.condition.trim()),
+      prescribedBy: encryptPhiRequired(input.prescribedBy.trim()),
+      dosage: encryptPhiRequired(input.dosage.trim()),
       startDate,
       endDate,
     },
   })
 
-  const today = new Date(Date.UTC(
-    new Date().getUTCFullYear(),
-    new Date().getUTCMonth(),
-    new Date().getUTCDate()
-  ))
+  const today = new Date(
+    Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())
+  )
   const newlyDiscontinued =
-    endDate &&
-    endDate <= today &&
-    (!existing.endDate || existing.endDate > today)
+    endDate && endDate <= today && (!existing.endDate || existing.endDate > today)
 
   if (newlyDiscontinued) {
-    await notifyMedicationDiscontinued(userId, record)
+    await notifyMedicationDiscontinued(userId, toMedicationResponse(record))
   }
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_UPDATE,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'Medication',
+    resourceId: record.id,
+  })
 
   return toMedicationResponse(record)
 }
@@ -196,9 +196,16 @@ export async function deleteMedication(userId: string, medicationId: string) {
   await assertPatientUser(userId)
   const existing = await getOwnedMedication(userId, medicationId)
 
-  await notifyMedicationDiscontinued(userId, existing)
+  await notifyMedicationDiscontinued(userId, toMedicationResponse(existing))
 
   await prisma.medication.delete({
     where: { id: medicationId },
+  })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_DELETE,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'Medication',
+    resourceId: medicationId,
   })
 }

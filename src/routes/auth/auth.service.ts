@@ -1,13 +1,34 @@
 import { USER_ROLES, type UserRole } from '~/config/roles'
 import type { User } from '~/generated/prisma'
 import { OtpPurpose } from '~/generated/prisma'
-import { signAccessToken, signPasswordResetToken, verifyPasswordResetToken } from '~/lib/auth'
+import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
+import {
+  signAccessToken,
+  signMfaPendingToken,
+  signPasswordResetToken,
+  verifyMfaPendingToken,
+  verifyPasswordResetToken,
+} from '~/lib/auth'
 import { sendPasswordResetEmail, sendSignInEmail, sendVerificationEmail } from '~/lib/email'
 import { HttpError } from '~/lib/error'
+import {
+  buildOtpAuthUrl,
+  decryptMfaSecret,
+  encryptMfaSecret,
+  generateMfaSecret,
+  verifyTotpCode,
+} from '~/lib/mfa'
 import { notifySignIn } from '~/lib/notifications'
-import { generateOtpCode, getOtpExpiryDate } from '~/lib/otp'
+import { generateOtpCode, getOtpExpiryDate, hashOtpCode } from '~/lib/otp'
 import { hashPassword, verifyPassword } from '~/lib/password'
+import { decryptPhiNullable, encryptPhiRequired } from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
+import {
+  buildLoginRateLimitKey,
+  checkLoginRateLimit,
+  clearLoginFailures,
+  recordLoginFailure,
+} from '~/lib/rate-limit'
 import type { IPayload } from '~/types'
 
 const GENERIC_RESET_MESSAGE =
@@ -17,18 +38,44 @@ type SignInContext = {
   ipAddress?: string | null
 }
 
-function toAuthUser(user: User) {
+export type AuthUserResponse = {
+  id: string
+  email: string
+  firstName: string | null
+  lastName: string | null
+  name: string | null
+  profileImage: string | null
+  role: UserRole
+  emailVerified: boolean
+  mustChangePassword: boolean
+  isFamilyMemberAccount: boolean
+  mfaEnabled: boolean
+}
+
+export type SessionIssueResult = {
+  mfaRequired: false
+  token: string
+  user: AuthUserResponse
+}
+
+export type MfaChallengeResult = {
+  mfaRequired: true
+  mfaToken: string
+}
+
+function toAuthUser(user: User): AuthUserResponse {
   return {
     id: user.id,
     email: user.email,
-    firstName: user.firstName,
-    lastName: user.lastName,
-    name: user.name,
+    firstName: decryptPhiNullable(user.firstName),
+    lastName: decryptPhiNullable(user.lastName),
+    name: decryptPhiNullable(user.name),
     profileImage: user.profileImage,
     role: user.role as UserRole,
     emailVerified: user.emailVerified,
     mustChangePassword: user.mustChangePassword,
     isFamilyMemberAccount: Boolean(user.managedByOwnerId),
+    mfaEnabled: user.mfaEnabled,
   }
 }
 
@@ -41,8 +88,9 @@ function toTokenPayload(user: User): IPayload {
   }
 }
 
-async function issueAccessToken(user: User) {
+function issueSession(user: User): SessionIssueResult {
   return {
+    mfaRequired: false,
     token: signAccessToken(toTokenPayload(user)),
     user: toAuthUser(user),
   }
@@ -77,7 +125,10 @@ async function recordSuccessfulSignIn(user: User, context?: SignInContext) {
   const signedInAt = new Date()
   const formattedTime = formatSignInTimestamp(signedInAt)
   const locationHint = context?.ipAddress ? ` from IP ${context.ipAddress}` : ''
-  const firstName = user.firstName?.trim() || user.name?.split(' ')[0] || 'there'
+  const firstName =
+    decryptPhiNullable(user.firstName)?.trim() ||
+    decryptPhiNullable(user.name)?.split(' ')[0] ||
+    'there'
 
   try {
     await Promise.all([
@@ -98,6 +149,18 @@ async function recordSuccessfulSignIn(user: User, context?: SignInContext) {
   }
 }
 
+function assertLoginRateLimit(email: string, context?: SignInContext) {
+  const key = buildLoginRateLimitKey(email, context?.ipAddress)
+  const limit = checkLoginRateLimit(key)
+  if (!limit.allowed) {
+    throw new HttpError(
+      `Too many login attempts. Try again in ${limit.retryAfterSeconds} seconds.`,
+      429
+    )
+  }
+  return key
+}
+
 async function createOtp(userId: string, purpose: OtpPurpose) {
   const code = generateOtpCode()
 
@@ -115,7 +178,7 @@ async function createOtp(userId: string, purpose: OtpPurpose) {
   await prisma.otp.create({
     data: {
       userId,
-      code,
+      code: hashOtpCode(code),
       purpose,
       expiresAt: getOtpExpiryDate(),
     },
@@ -134,7 +197,7 @@ async function consumeValidOtp(email: string, otp: string, purpose: OtpPurpose) 
     where: {
       userId: user.id,
       purpose,
-      code: otp,
+      code: hashOtpCode(otp),
       consumedAt: null,
       expiresAt: { gt: new Date() },
     },
@@ -172,12 +235,19 @@ export async function signupUser(input: {
   const user = await prisma.user.create({
     data: {
       email,
-      firstName: input.firstName.trim(),
-      lastName: input.lastName.trim(),
-      name,
+      firstName: encryptPhiRequired(input.firstName.trim()),
+      lastName: encryptPhiRequired(input.lastName.trim()),
+      name: encryptPhiRequired(name),
       password: passwordHash,
       role: USER_ROLES.USER,
     },
+  })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_CREATE,
+    actorUserId: user.id,
+    patientUserId: user.id,
+    resourceType: 'PatientProfile',
+    resourceId: user.id,
   })
 
   const code = await createOtp(user.id, OtpPurpose.EMAIL_VERIFICATION)
@@ -190,35 +260,101 @@ export async function loginUser(
   email: string,
   password: string,
   context?: SignInContext
-) {
+): Promise<SessionIssueResult | MfaChallengeResult> {
   const normalizedEmail = email.toLowerCase().trim()
+  const rateKey = assertLoginRateLimit(normalizedEmail, context)
   const user = await prisma.user.findUnique({ where: { email: normalizedEmail } })
 
   if (!user || !(await verifyPassword(password, user.password))) {
+    recordLoginFailure(rateKey)
+    await writeAuditLog({
+      action: AUDIT_ACTIONS.LOGIN_FAILURE,
+      resourceType: 'Auth',
+      ip: context?.ipAddress,
+      metadata: { email: normalizedEmail },
+    })
     throw new HttpError('Invalid email or password.', 401)
   }
 
   if (user.isBlocked) {
-    throw new HttpError(
-      'Your account has been blocked. Please contact support.',
-      403
-    )
+    throw new HttpError('Your account has been blocked. Please contact support.', 403)
   }
 
   if (!user.emailVerified) {
     throw new HttpError('Please verify your email before logging in.', 403)
   }
 
-  await recordSuccessfulSignIn(user, context)
+  if (user.mfaEnabled && user.mfaSecret) {
+    return {
+      mfaRequired: true,
+      mfaToken: signMfaPendingToken(toTokenPayload(user)),
+    }
+  }
 
-  return issueAccessToken(user)
+  clearLoginFailures(rateKey)
+  await recordSuccessfulSignIn(user, context)
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.LOGIN_SUCCESS,
+    actorUserId: user.id,
+    actorRole: user.role,
+    resourceType: 'Auth',
+    resourceId: user.id,
+    ip: context?.ipAddress,
+  })
+
+  return issueSession(user)
 }
 
-export async function verifyEmail(
-  email: string,
-  otp: string,
+export async function verifyMfaLogin(
+  mfaToken: string,
+  code: string,
   context?: SignInContext
-) {
+): Promise<SessionIssueResult> {
+  const payload = verifyMfaPendingToken(mfaToken)
+  if (!payload) {
+    throw new HttpError('Invalid or expired MFA session. Please sign in again.', 401)
+  }
+
+  const rateKey = assertLoginRateLimit(payload.email, context)
+  const user = await prisma.user.findUnique({ where: { id: payload.user_id } })
+
+  if (!user || !user.mfaEnabled || !user.mfaSecret) {
+    throw new HttpError('MFA is not enabled for this account.', 400)
+  }
+
+  if (user.isBlocked) {
+    throw new HttpError('Your account has been blocked. Please contact support.', 403)
+  }
+
+  const secret = decryptMfaSecret(user.mfaSecret)
+  if (!secret || !verifyTotpCode(secret, code)) {
+    recordLoginFailure(rateKey)
+    await writeAuditLog({
+      action: AUDIT_ACTIONS.LOGIN_FAILURE,
+      actorUserId: user.id,
+      resourceType: 'Auth',
+      ip: context?.ipAddress,
+      metadata: { reason: 'mfa_invalid' },
+    })
+    throw new HttpError('Invalid authenticator code.', 401)
+  }
+
+  clearLoginFailures(rateKey)
+  await recordSuccessfulSignIn(user, context)
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.LOGIN_SUCCESS,
+    actorUserId: user.id,
+    actorRole: user.role,
+    resourceType: 'Auth',
+    resourceId: user.id,
+    ip: context?.ipAddress,
+    metadata: { mfa: true },
+  })
+
+  return issueSession(user)
+}
+
+export async function verifyEmail(email: string, otp: string, context?: SignInContext) {
   const user = await consumeValidOtp(email.toLowerCase().trim(), otp, OtpPurpose.EMAIL_VERIFICATION)
 
   if (!user) {
@@ -226,10 +362,7 @@ export async function verifyEmail(
   }
 
   if (user.isBlocked) {
-    throw new HttpError(
-      'Your account has been blocked. Please contact support.',
-      403
-    )
+    throw new HttpError('Your account has been blocked. Please contact support.', 403)
   }
 
   const verifiedUser = await prisma.user.update({
@@ -239,7 +372,7 @@ export async function verifyEmail(
 
   await recordSuccessfulSignIn(verifiedUser, context)
 
-  return issueAccessToken(verifiedUser)
+  return issueSession(verifiedUser)
 }
 
 export async function resendVerification(email: string) {
@@ -320,6 +453,89 @@ export async function resetPassword(token: string, password: string) {
       data: { usedAt: new Date() },
     }),
   ])
+}
+
+export async function getMfaStatus(userId: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } })
+  if (!user) {
+    throw new HttpError('User not found.', 404)
+  }
+
+  return { mfaEnabled: user.mfaEnabled }
+}
+
+export async function setupMfa(userId: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } })
+  if (!user) {
+    throw new HttpError('User not found.', 404)
+  }
+
+  if (user.mfaEnabled) {
+    throw new HttpError('Authenticator MFA is already enabled.', 400)
+  }
+
+  const secret = generateMfaSecret()
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      mfaSecret: encryptMfaSecret(secret),
+      mfaEnabled: false,
+    },
+  })
+
+  return {
+    secret,
+    otpauthUrl: buildOtpAuthUrl(user.email, secret),
+  }
+}
+
+export async function enableMfa(userId: string, code: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } })
+  if (!user) {
+    throw new HttpError('User not found.', 404)
+  }
+
+  const secret = decryptMfaSecret(user.mfaSecret)
+  if (!secret) {
+    throw new HttpError('Start MFA setup before enabling it.', 400)
+  }
+
+  if (!verifyTotpCode(secret, code)) {
+    throw new HttpError('Invalid authenticator code.', 400)
+  }
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { mfaEnabled: true },
+  })
+
+  return { mfaEnabled: true }
+}
+
+export async function disableMfa(userId: string, code: string, password: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } })
+  if (!user) {
+    throw new HttpError('User not found.', 404)
+  }
+
+  if (!(await verifyPassword(password, user.password))) {
+    throw new HttpError('Current password is incorrect.', 400)
+  }
+
+  const secret = decryptMfaSecret(user.mfaSecret)
+  if (!user.mfaEnabled || !secret || !verifyTotpCode(secret, code)) {
+    throw new HttpError('Invalid authenticator code.', 400)
+  }
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      mfaEnabled: false,
+      mfaSecret: null,
+    },
+  })
+
+  return { mfaEnabled: false }
 }
 
 export { GENERIC_RESET_MESSAGE }

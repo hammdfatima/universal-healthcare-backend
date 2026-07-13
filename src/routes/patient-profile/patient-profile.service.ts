@@ -1,6 +1,13 @@
-import { USER_ROLES } from '~/config/roles'
 import type { User } from '~/generated/prisma'
+import { assertPatientUser } from '~/lib/assert-patient'
+import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { HttpError } from '~/lib/error'
+import {
+  decryptDateNullable,
+  decryptPhiNullable,
+  encryptDateToPhi,
+  encryptPhiRequired,
+} from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 
 type CompleteOnboardingInput = {
@@ -15,56 +22,48 @@ type CompleteOnboardingInput = {
 }
 
 function formatDateOfBirth(date: Date | null): string | null {
-  if (!date) return null
-
-  const month = String(date.getUTCMonth() + 1).padStart(2, '0')
-  const day = String(date.getUTCDate()).padStart(2, '0')
-  const year = date.getUTCFullYear()
-
-  return `${month}/${day}/${year}`
+  if (!date) {
+    return null
+  }
+  return date.toISOString()
 }
 
 function toPatientProfileResponse(user: User) {
   return {
     id: user.id,
-    firstName: user.firstName,
-    lastName: user.lastName,
+    firstName: decryptPhiNullable(user.firstName),
+    lastName: decryptPhiNullable(user.lastName),
     email: user.email,
-    phone: user.phone,
+    phone: decryptPhiNullable(user.phone),
     profileImage: user.profileImage,
-    dateOfBirth: formatDateOfBirth(user.dateOfBirth),
-    bloodGroup: user.bloodGroup,
-    gender: user.gender,
-    address: user.address,
+    dateOfBirth: formatDateOfBirth(decryptDateNullable(user.dateOfBirth)),
+    bloodGroup: decryptPhiNullable(user.bloodGroup),
+    gender: decryptPhiNullable(user.gender),
+    address: decryptPhiNullable(user.address),
     onboardingCompleted: user.onboardingCompleted,
     createdAt: user.createdAt.toISOString(),
     updatedAt: user.updatedAt.toISOString(),
   }
 }
 
-function assertPatientUser(user: User | null) {
+export async function getPatientProfile(userId: string) {
+  await assertPatientUser(userId)
+  const user = await prisma.user.findUnique({ where: { id: userId } })
   if (!user) {
     throw new HttpError('User not found.', 404)
   }
-
-  if (user.role !== USER_ROLES.USER) {
-    throw new HttpError('Forbidden', 403)
-  }
-
-  return user
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_READ,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'PatientProfile',
+    resourceId: userId,
+  })
+  return toPatientProfileResponse(user)
 }
 
-export async function getPatientProfile(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId } })
-  return toPatientProfileResponse(assertPatientUser(user))
-}
-
-export async function completePatientOnboarding(
-  userId: string,
-  input: CompleteOnboardingInput
-) {
-  const existing = await prisma.user.findUnique({ where: { id: userId } })
-  assertPatientUser(existing)
+export async function completePatientOnboarding(userId: string, input: CompleteOnboardingInput) {
+  await assertPatientUser(userId)
 
   const user = await prisma.user.update({
     where: { id: userId },
@@ -72,6 +71,13 @@ export async function completePatientOnboarding(
       ...buildProfileUpdateData(input),
       onboardingCompleted: true,
     },
+  })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_CREATE,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'PatientProfile',
+    resourceId: userId,
   })
 
   return toPatientProfileResponse(user)
@@ -85,25 +91,24 @@ function buildProfileUpdateData(input: CompleteOnboardingInput) {
   assertDateOfBirthInPast(dateOfBirth)
 
   return {
-    firstName,
-    lastName,
-    name: `${firstName} ${lastName}`.trim(),
-    phone: input.phone.trim(),
+    firstName: encryptPhiRequired(firstName),
+    lastName: encryptPhiRequired(lastName),
+    name: encryptPhiRequired(`${firstName} ${lastName}`.trim()),
+    phone: encryptPhiRequired(input.phone.trim()),
     profileImage: input.profileImage?.trim() || null,
-    gender: input.gender,
-    dateOfBirth,
-    bloodGroup: input.bloodGroup,
-    address: input.address.trim(),
+    gender: encryptPhiRequired(input.gender.trim()),
+    dateOfBirth: encryptDateToPhi(dateOfBirth),
+    bloodGroup: encryptPhiRequired(input.bloodGroup.trim()),
+    address: encryptPhiRequired(input.address.trim()),
   }
 }
 
 function assertDateOfBirthInPast(dateOfBirth: Date) {
+  if (Number.isNaN(dateOfBirth.getTime())) {
+    throw new HttpError('Invalid date of birth.', 400)
+  }
   const today = new Date()
-  const todayUtc = Date.UTC(
-    today.getUTCFullYear(),
-    today.getUTCMonth(),
-    today.getUTCDate()
-  )
+  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())
   const dobUtc = Date.UTC(
     dateOfBirth.getUTCFullYear(),
     dateOfBirth.getUTCMonth(),
@@ -115,16 +120,19 @@ function assertDateOfBirthInPast(dateOfBirth: Date) {
   }
 }
 
-export async function updatePatientProfileData(
-  userId: string,
-  input: CompleteOnboardingInput
-) {
-  const existing = await prisma.user.findUnique({ where: { id: userId } })
-  assertPatientUser(existing)
+export async function updatePatientProfileData(userId: string, input: CompleteOnboardingInput) {
+  await assertPatientUser(userId)
 
   const user = await prisma.user.update({
     where: { id: userId },
     data: buildProfileUpdateData(input),
+  })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_UPDATE,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'PatientProfile',
+    resourceId: userId,
   })
 
   return toPatientProfileResponse(user)

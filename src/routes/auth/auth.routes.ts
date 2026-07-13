@@ -3,15 +3,22 @@ import * as HttpStatusCodes from 'stoker/http-status-codes'
 import { jsonContent, jsonContentRequired } from 'stoker/openapi/helpers'
 import { zodResponseSchema } from '~/lib/zod-helper'
 import {
-  authTokenResponseSchema,
+  disableMfaBodySchema,
   emailOnlyBodySchema,
+  enableMfaBodySchema,
   loginBodySchema,
+  loginResponseSchema,
   messageResponseSchema,
+  mfaSetupSchema,
+  mfaStatusSchema,
   resetPasswordBodySchema,
   resetTokenResponseSchema,
   sessionResponseSchema,
+  sessionUserResponseSchema,
   signupBodySchema,
+  signupSessionUserResponseSchema,
   verifyEmailBodySchema,
+  verifyMfaLoginBodySchema,
   verifyResetOtpBodySchema,
 } from '~/routes/auth/auth.schemas'
 
@@ -21,7 +28,8 @@ export const AUTH_ROUTES = {
     tags: ['Auth'],
     path: '/auth/signup',
     summary: 'Sign up',
-    description: 'Create a new user account and send an email verification code.',
+    description:
+      'Create a new patient (USER) account and send an email verification code. Admin accounts cannot be created through this endpoint.',
     request: {
       body: jsonContentRequired(signupBodySchema, 'Signup credentials'),
     },
@@ -47,8 +55,8 @@ export const AUTH_ROUTES = {
     },
     responses: {
       [HttpStatusCodes.OK]: jsonContent(
-        zodResponseSchema(authTokenResponseSchema),
-        'Login successful'
+        zodResponseSchema(loginResponseSchema),
+        'Login successful or MFA required'
       ),
       [HttpStatusCodes.UNAUTHORIZED]: jsonContent(
         zodResponseSchema(messageResponseSchema),
@@ -57,6 +65,34 @@ export const AUTH_ROUTES = {
       [HttpStatusCodes.FORBIDDEN]: jsonContent(
         zodResponseSchema(messageResponseSchema),
         'Email not verified'
+      ),
+      [HttpStatusCodes.TOO_MANY_REQUESTS]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Rate limited'
+      ),
+    },
+  }),
+
+  verifyMfaLogin: createRoute({
+    method: 'post',
+    tags: ['Auth'],
+    path: '/auth/mfa/verify-login',
+    summary: 'Complete login with authenticator code',
+    request: {
+      body: jsonContentRequired(verifyMfaLoginBodySchema, 'MFA login payload'),
+    },
+    responses: {
+      [HttpStatusCodes.OK]: jsonContent(
+        zodResponseSchema(sessionUserResponseSchema),
+        'Login successful'
+      ),
+      [HttpStatusCodes.UNAUTHORIZED]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Invalid MFA code'
+      ),
+      [HttpStatusCodes.TOO_MANY_REQUESTS]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Rate limited'
       ),
     },
   }),
@@ -72,7 +108,7 @@ export const AUTH_ROUTES = {
     },
     responses: {
       [HttpStatusCodes.OK]: jsonContent(
-        zodResponseSchema(authTokenResponseSchema),
+        zodResponseSchema(signupSessionUserResponseSchema),
         'Email verified'
       ),
       [HttpStatusCodes.BAD_REQUEST]: jsonContent(
@@ -155,12 +191,26 @@ export const AUTH_ROUTES = {
     },
   }),
 
+  logout: createRoute({
+    method: 'post',
+    tags: ['Auth'],
+    path: '/auth/logout',
+    summary: 'Log out and clear auth cookie',
+    responses: {
+      [HttpStatusCodes.OK]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Logged out'
+      ),
+    },
+  }),
+
   session: createRoute({
     method: 'get',
     tags: ['Auth'],
     path: '/auth/session',
     summary: 'Validate current session',
     description: 'Lightweight check used by clients to detect blocked accounts or revoked sessions.',
+    security: [{ bearerAuth: [] }],
     responses: {
       [HttpStatusCodes.OK]: jsonContent(
         zodResponseSchema(sessionResponseSchema),
@@ -173,6 +223,68 @@ export const AUTH_ROUTES = {
       [HttpStatusCodes.FORBIDDEN]: jsonContent(
         zodResponseSchema(messageResponseSchema),
         'Account blocked'
+      ),
+    },
+  }),
+
+  getMfaStatus: createRoute({
+    method: 'get',
+    tags: ['Auth'],
+    path: '/auth/mfa',
+    summary: 'Get MFA status',
+    security: [{ bearerAuth: [] }],
+    responses: {
+      [HttpStatusCodes.OK]: jsonContent(
+        zodResponseSchema(mfaStatusSchema),
+        'MFA status'
+      ),
+    },
+  }),
+
+  setupMfa: createRoute({
+    method: 'post',
+    tags: ['Auth'],
+    path: '/auth/mfa/setup',
+    summary: 'Start authenticator MFA setup',
+    security: [{ bearerAuth: [] }],
+    responses: {
+      [HttpStatusCodes.OK]: jsonContent(
+        zodResponseSchema(mfaSetupSchema),
+        'MFA setup secret'
+      ),
+    },
+  }),
+
+  enableMfa: createRoute({
+    method: 'post',
+    tags: ['Auth'],
+    path: '/auth/mfa/enable',
+    summary: 'Enable authenticator MFA',
+    security: [{ bearerAuth: [] }],
+    request: {
+      body: jsonContentRequired(enableMfaBodySchema, 'TOTP code'),
+    },
+    responses: {
+      [HttpStatusCodes.OK]: jsonContent(
+        zodResponseSchema(mfaStatusSchema),
+        'MFA enabled'
+      ),
+    },
+  }),
+
+  disableMfa: createRoute({
+    method: 'post',
+    tags: ['Auth'],
+    path: '/auth/mfa/disable',
+    summary: 'Disable authenticator MFA',
+    security: [{ bearerAuth: [] }],
+    request: {
+      body: jsonContentRequired(disableMfaBodySchema, 'TOTP code and password'),
+    },
+    responses: {
+      [HttpStatusCodes.OK]: jsonContent(
+        zodResponseSchema(mfaStatusSchema),
+        'MFA disabled'
       ),
     },
   }),

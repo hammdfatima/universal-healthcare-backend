@@ -1,6 +1,8 @@
-import { USER_ROLES } from '~/config/roles'
 import type { HealthHistoryEntry } from '~/generated/prisma'
+import { assertPatientUser } from '~/lib/assert-patient'
+import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { HttpError } from '~/lib/error'
+import { decryptPhi, encryptPhiRequired } from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 
 type HealthHistoryInput = {
@@ -51,27 +53,13 @@ function parseHealthHistoryDate(value: string, fieldLabel: string): Date {
 function toHealthHistoryResponse(record: HealthHistoryEntry) {
   return {
     id: record.id,
-    illnessName: record.illnessName,
+    illnessName: decryptPhi(record.illnessName),
     diagnosisDate: formatHealthHistoryDate(record.diagnosisDate),
-    prescribedBy: record.prescribedBy,
-    details: record.details,
+    prescribedBy: decryptPhi(record.prescribedBy),
+    details: decryptPhi(record.details),
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
   }
-}
-
-async function assertPatientUser(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId } })
-
-  if (!user) {
-    throw new HttpError('User not found.', 404)
-  }
-
-  if (user.role !== USER_ROLES.USER) {
-    throw new HttpError('Forbidden', 403)
-  }
-
-  return user
 }
 
 async function getOwnedHealthHistoryEntry(userId: string, entryId: string) {
@@ -96,29 +84,36 @@ export async function listHealthHistoryEntries(userId: string) {
     where: { userId },
     orderBy: { diagnosisDate: 'desc' },
   })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_READ,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'HealthHistoryEntry',
+  })
 
   return {
     entries: entries.map(toHealthHistoryResponse),
   }
 }
 
-export async function createHealthHistoryEntry(
-  userId: string,
-  input: HealthHistoryInput
-) {
+export async function createHealthHistoryEntry(userId: string, input: HealthHistoryInput) {
   await assertPatientUser(userId)
 
   const record = await prisma.healthHistoryEntry.create({
     data: {
       userId,
-      illnessName: input.illnessName.trim(),
-      diagnosisDate: parseHealthHistoryDate(
-        input.diagnosisDate,
-        'date of diagnosis'
-      ),
-      prescribedBy: input.prescribedBy.trim(),
-      details: input.details.trim(),
+      illnessName: encryptPhiRequired(input.illnessName.trim()),
+      diagnosisDate: parseHealthHistoryDate(input.diagnosisDate, 'date of diagnosis'),
+      prescribedBy: encryptPhiRequired(input.prescribedBy.trim()),
+      details: encryptPhiRequired(input.details.trim()),
     },
+  })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_CREATE,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'HealthHistoryEntry',
+    resourceId: record.id,
   })
 
   return toHealthHistoryResponse(record)
@@ -135,14 +130,18 @@ export async function updateHealthHistoryEntry(
   const record = await prisma.healthHistoryEntry.update({
     where: { id: entryId },
     data: {
-      illnessName: input.illnessName.trim(),
-      diagnosisDate: parseHealthHistoryDate(
-        input.diagnosisDate,
-        'date of diagnosis'
-      ),
-      prescribedBy: input.prescribedBy.trim(),
-      details: input.details.trim(),
+      illnessName: encryptPhiRequired(input.illnessName.trim()),
+      diagnosisDate: parseHealthHistoryDate(input.diagnosisDate, 'date of diagnosis'),
+      prescribedBy: encryptPhiRequired(input.prescribedBy.trim()),
+      details: encryptPhiRequired(input.details.trim()),
     },
+  })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_UPDATE,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'HealthHistoryEntry',
+    resourceId: record.id,
   })
 
   return toHealthHistoryResponse(record)
@@ -154,5 +153,12 @@ export async function deleteHealthHistoryEntry(userId: string, entryId: string) 
 
   await prisma.healthHistoryEntry.delete({
     where: { id: entryId },
+  })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_DELETE,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'HealthHistoryEntry',
+    resourceId: entryId,
   })
 }

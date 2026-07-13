@@ -6,6 +6,20 @@ const envSchema = z
     PORT_NO: z.coerce.number().optional(),
     JWT_SECRET: z.string().min(1),
     DATABASE_URL: z.string().min(1),
+    PHI_ENCRYPTION_KEY: z
+      .string()
+      .min(1)
+      .refine(value => {
+        try {
+          return Buffer.from(value, 'base64').length === 32
+        } catch {
+          return false
+        }
+      }, 'PHI_ENCRYPTION_KEY must be a 32-byte base64-encoded key'),
+    ENABLE_API_DOCS: z
+      .enum(['true', 'false'])
+      .optional()
+      .transform(value => value === 'true'),
     RESEND_API_KEY: z.string().optional(),
     STRIPE_SECRET_KEY: z.string().min(1),
     STRIPE_WEBHOOK_SECRET: z.string().optional(),

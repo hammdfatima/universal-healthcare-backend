@@ -1,7 +1,14 @@
 import { USER_ROLES } from '~/config/roles'
+import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { deleteCloudinaryFile } from '~/lib/cloudinary'
 import { HttpError } from '~/lib/error'
 import { hashPassword, verifyPassword } from '~/lib/password'
+import {
+  decryptDateNullable,
+  decryptPhi,
+  decryptPhiNullable,
+  decryptStringArray,
+} from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 import { getStripeClient } from '~/lib/stripe'
 import {
@@ -43,10 +50,7 @@ export async function getPatientSettings(userId: string) {
   }
 }
 
-export async function updatePatientSettingsProfile(
-  userId: string,
-  input: UpdateProfileInput
-) {
+export async function updatePatientSettingsProfile(userId: string, input: UpdateProfileInput) {
   const profile = await updatePatientProfileData(userId, input)
 
   return {
@@ -55,10 +59,7 @@ export async function updatePatientSettingsProfile(
   }
 }
 
-export async function updatePatientAccountSettings(
-  userId: string,
-  input: UpdateAccountInput
-) {
+export async function updatePatientAccountSettings(userId: string, input: UpdateAccountInput) {
   const user = await prisma.user.update({
     where: { id: userId },
     data: {
@@ -133,7 +134,7 @@ async function deleteUserUploadedFiles(userId: string) {
     const resourceType = (record.fileResourceType ?? 'image') as CloudinaryResourceType
 
     try {
-      await deleteCloudinaryFile(record.filePublicId, resourceType)
+      await deleteCloudinaryFile(decryptPhi(record.filePublicId), resourceType)
     } catch {
       // File may already be removed from Cloudinary.
     }
@@ -222,37 +223,98 @@ export async function exportPatientData(userId: string) {
       orderBy: { createdAt: 'asc' },
     }),
   ])
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_READ,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'PatientDataExport',
+    resourceId: userId,
+  })
 
   return {
     exportedAt: new Date().toISOString(),
     profile,
-    medications,
-    allergies,
-    healthHistory,
+    medications: medications.map(record => ({
+      ...record,
+      medicineName: decryptPhi(record.medicineName),
+      condition: decryptPhi(record.condition),
+      prescribedBy: decryptPhi(record.prescribedBy),
+      dosage: decryptPhi(record.dosage),
+      startDate: record.startDate.toISOString(),
+      endDate: record.endDate?.toISOString() ?? null,
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+    })),
+    allergies: allergies.map(record => ({
+      ...record,
+      allergyType: decryptPhi(record.allergyType),
+      nature: decryptPhi(record.nature),
+      symptoms: decryptStringArray(record.symptoms),
+      triggers: decryptStringArray(record.triggers),
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+    })),
+    healthHistory: healthHistory.map(record => ({
+      ...record,
+      illnessName: decryptPhi(record.illnessName),
+      prescribedBy: decryptPhi(record.prescribedBy),
+      details: decryptPhi(record.details),
+      diagnosisDate: record.diagnosisDate.toISOString(),
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+    })),
     vaccinations: vaccinations.map(record => ({
       ...record,
+      vaccineName: decryptPhi(record.vaccineName),
+      prescribedBy: decryptPhi(record.prescribedBy),
+      administeredBy: decryptPhi(record.administeredBy),
+      dosage: decryptPhi(record.dosage),
+      time: decryptPhi(record.time),
       vaccinationDate: record.vaccinationDate.toISOString(),
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
     })),
     labResults: labResults.map(record => ({
       ...record,
+      fileName: decryptPhi(record.fileName),
+      testType: decryptPhi(record.testType),
+      fileUrl: decryptPhi(record.fileUrl),
+      filePublicId: decryptPhi(record.filePublicId),
       testDate: record.testDate.toISOString(),
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
     })),
     imagingResults: imagingResults.map(record => ({
       ...record,
+      fileName: decryptPhi(record.fileName),
+      testType: decryptPhi(record.testType),
+      scanType: decryptPhi(record.scanType),
+      fileUrl: decryptPhi(record.fileUrl),
+      filePublicId: decryptPhi(record.filePublicId),
       scanDate: record.scanDate.toISOString(),
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
     })),
-    careProviders,
+    careProviders: careProviders.map(record => ({
+      ...record,
+      name: decryptPhi(record.name),
+      phone: decryptPhi(record.phone),
+      email: decryptPhiNullable(record.email),
+      clinicDetails: decryptPhiNullable(record.clinicDetails),
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+    })),
     familyMembers: familyMembers.map(record => ({
       id: record.id,
       relationship: record.relationship,
       isEmergencyContact: record.isEmergencyContact,
-      member: record.memberUser,
+      member: {
+        ...record.memberUser,
+        firstName: decryptPhiNullable(record.memberUser.firstName),
+        lastName: decryptPhiNullable(record.memberUser.lastName),
+        phone: decryptPhiNullable(record.memberUser.phone),
+        dateOfBirth: decryptDateNullable(record.memberUser.dateOfBirth)?.toISOString() ?? null,
+      },
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
     })),
@@ -285,5 +347,12 @@ export async function deletePatientAccount(userId: string, confirmation: string)
     await permanentlyDeleteUser(familyMember.memberUserId)
   }
 
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_DELETE,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'PatientAccount',
+    resourceId: userId,
+  })
   await permanentlyDeleteUser(userId)
 }

@@ -5,7 +5,8 @@ import type { HandlerMapFromRoutes } from '~/types'
 
 export const USER_ROUTE_HANDLER: HandlerMapFromRoutes<typeof USER_ROUTES> = {
   listAdmin: async c => {
-    const users = await listAdminUsers()
+    const authUser = c.get('user')
+    const users = await listAdminUsers(authUser.user_id)
 
     return c.json(
       {
@@ -18,8 +19,9 @@ export const USER_ROUTE_HANDLER: HandlerMapFromRoutes<typeof USER_ROUTES> = {
   },
 
   block: async c => {
+    const authUser = c.get('user')
     const { id } = c.req.valid('param')
-    const user = await blockUser(id)
+    const user = await blockUser(id, authUser.user_id)
 
     return c.json(
       {
@@ -32,8 +34,9 @@ export const USER_ROUTE_HANDLER: HandlerMapFromRoutes<typeof USER_ROUTES> = {
   },
 
   unblock: async c => {
+    const authUser = c.get('user')
     const { id } = c.req.valid('param')
-    const user = await unblockUser(id)
+    const user = await unblockUser(id, authUser.user_id)
 
     return c.json(
       {

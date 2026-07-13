@@ -1,6 +1,11 @@
 import type { User } from '~/generated/prisma'
 import { HttpError } from '~/lib/error'
 import { hashPassword, verifyPassword } from '~/lib/password'
+import {
+  decryptPhiNullable,
+  encryptPhiNullable,
+  encryptPhiRequired,
+} from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 
 type AdminProfileInput = {
@@ -10,11 +15,15 @@ type AdminProfileInput = {
 }
 
 function getDisplayName(user: User): string {
-  if (user.name?.trim()) {
-    return user.name.trim()
+  const name = decryptPhiNullable(user.name)?.trim()
+  if (name) {
+    return name
   }
 
-  const parts = [user.firstName, user.lastName].filter(Boolean)
+  const parts = [
+    decryptPhiNullable(user.firstName),
+    decryptPhiNullable(user.lastName),
+  ].filter(Boolean)
 
   if (parts.length > 0) {
     return parts.join(' ')
@@ -28,7 +37,7 @@ function toAdminProfileResponse(user: User) {
     id: user.id,
     name: getDisplayName(user),
     email: user.email,
-    phone: user.phone,
+    phone: decryptPhiNullable(user.phone),
     emailVerified: user.emailVerified,
     createdAt: user.createdAt.toISOString(),
     updatedAt: user.updatedAt.toISOString(),
@@ -69,9 +78,9 @@ export async function updateAdminProfile(userId: string, input: AdminProfileInpu
   const user = await prisma.user.update({
     where: { id: userId },
     data: {
-      name: normalizedName,
+      name: encryptPhiRequired(normalizedName),
       email: normalizedEmail,
-      phone: normalizedPhone,
+      phone: encryptPhiNullable(normalizedPhone),
       emailVerified:
         normalizedEmail === existing.email ? existing.emailVerified : false,
     },

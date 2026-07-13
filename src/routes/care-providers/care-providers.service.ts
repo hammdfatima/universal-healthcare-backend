@@ -1,11 +1,18 @@
-import { USER_ROLES } from '~/config/roles'
 import type { CareProvider } from '~/generated/prisma'
+import { assertPatientUser } from '~/lib/assert-patient'
+import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { HttpError } from '~/lib/error'
 import {
   notifyCareProviderAdded,
   notifyCareProviderRemoved,
   notifyCareProviderUpdated,
 } from '~/lib/notifications'
+import {
+  decryptPhi,
+  decryptPhiNullable,
+  encryptPhiNullable,
+  encryptPhiRequired,
+} from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 
 type CareProviderInput = {
@@ -28,27 +35,13 @@ function normalizeOptionalText(value?: string): string | null {
 function toCareProviderResponse(record: CareProvider) {
   return {
     id: record.id,
-    name: record.name,
-    phone: record.phone,
-    email: record.email,
-    clinicDetails: record.clinicDetails,
+    name: decryptPhi(record.name),
+    phone: decryptPhi(record.phone),
+    email: decryptPhiNullable(record.email),
+    clinicDetails: decryptPhiNullable(record.clinicDetails),
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
   }
-}
-
-async function assertPatientUser(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId } })
-
-  if (!user) {
-    throw new HttpError('User not found.', 404)
-  }
-
-  if (user.role !== USER_ROLES.USER) {
-    throw new HttpError('Forbidden', 403)
-  }
-
-  return user
 }
 
 async function getOwnedCareProvider(userId: string, careProviderId: string) {
@@ -73,6 +66,12 @@ export async function listCareProviders(userId: string) {
     where: { userId },
     orderBy: { createdAt: 'asc' },
   })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_READ,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'CareProvider',
+  })
 
   return {
     providers: providers.map(toCareProviderResponse),
@@ -85,14 +84,23 @@ export async function createCareProvider(userId: string, input: CareProviderInpu
   const record = await prisma.careProvider.create({
     data: {
       userId,
-      name: input.name.trim(),
-      phone: input.phone.trim(),
-      email: normalizeOptionalText(input.email),
-      clinicDetails: normalizeOptionalText(input.clinicDetails),
+      name: encryptPhiRequired(input.name.trim()),
+      phone: encryptPhiRequired(input.phone.trim()),
+      email: encryptPhiNullable(normalizeOptionalText(input.email)),
+      clinicDetails: encryptPhiNullable(normalizeOptionalText(input.clinicDetails)),
     },
   })
 
-  await notifyCareProviderAdded(userId, record)
+  await Promise.all([
+    notifyCareProviderAdded(userId, toCareProviderResponse(record)),
+    writeAuditLog({
+      action: AUDIT_ACTIONS.PHI_CREATE,
+      actorUserId: userId,
+      patientUserId: userId,
+      resourceType: 'CareProvider',
+      resourceId: record.id,
+    }),
+  ])
 
   return toCareProviderResponse(record)
 }
@@ -108,14 +116,23 @@ export async function updateCareProvider(
   const record = await prisma.careProvider.update({
     where: { id: careProviderId },
     data: {
-      name: input.name.trim(),
-      phone: input.phone.trim(),
-      email: normalizeOptionalText(input.email),
-      clinicDetails: normalizeOptionalText(input.clinicDetails),
+      name: encryptPhiRequired(input.name.trim()),
+      phone: encryptPhiRequired(input.phone.trim()),
+      email: encryptPhiNullable(normalizeOptionalText(input.email)),
+      clinicDetails: encryptPhiNullable(normalizeOptionalText(input.clinicDetails)),
     },
   })
 
-  await notifyCareProviderUpdated(userId, record)
+  await Promise.all([
+    notifyCareProviderUpdated(userId, toCareProviderResponse(record)),
+    writeAuditLog({
+      action: AUDIT_ACTIONS.PHI_UPDATE,
+      actorUserId: userId,
+      patientUserId: userId,
+      resourceType: 'CareProvider',
+      resourceId: record.id,
+    }),
+  ])
 
   return toCareProviderResponse(record)
 }
@@ -124,9 +141,16 @@ export async function deleteCareProvider(userId: string, careProviderId: string)
   await assertPatientUser(userId)
   const existing = await getOwnedCareProvider(userId, careProviderId)
 
-  await notifyCareProviderRemoved(userId, existing)
+  await notifyCareProviderRemoved(userId, toCareProviderResponse(existing))
 
   await prisma.careProvider.delete({
     where: { id: careProviderId },
+  })
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_DELETE,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'CareProvider',
+    resourceId: careProviderId,
   })
 }

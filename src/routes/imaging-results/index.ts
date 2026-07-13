@@ -1,12 +1,12 @@
 import { createRouter } from '~/lib/create-app'
-import { requireAuth } from '~/middleware/require-admin'
+import { requirePatient } from '~/middleware/require-admin'
 import { IMAGING_RESULTS_ROUTE_HANDLER } from '~/routes/imaging-results/imaging-results.handler'
 import { IMAGING_RESULTS_ROUTES } from '~/routes/imaging-results/imaging-results.routes'
 
 const router = createRouter()
 
-router.use('/imaging-results', requireAuth)
-router.use('/imaging-results/*', requireAuth)
+router.use('/imaging-results', requirePatient)
+router.use('/imaging-results/*', requirePatient)
 
 router
   .openapi(

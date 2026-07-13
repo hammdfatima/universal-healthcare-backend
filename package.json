@@ -13,7 +13,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "db:encrypt-phi": "bun run scripts/encrypt-existing-phi.ts"
   },
   "dependencies": {
     "@hono/zod-openapi": "^1.1.0",
@@ -22,6 +23,7 @@
     "cloudinary": "^2.10.0",
     "hono": "^4.9.6",
     "jsonwebtoken": "^9.0.3",
+    "otpauth": "^9.5.1",
     "prisma": "^6.15.0",
     "stoker": "^2.0.1",
     "stripe": "^22.3.0",

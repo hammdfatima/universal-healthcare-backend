@@ -3,6 +3,10 @@ import { notFound } from "stoker/middlewares";
 
 import onError from "~/middleware/error-middleware";
 import { customLogger } from "~/middleware/pino-logger";
+import {
+  extractClientIp,
+  runWithRequestAuditContext,
+} from "~/lib/request-context";
 import type { AppBindings } from "~/types";
 
 export function createRouter() {
@@ -25,6 +29,16 @@ export function createRouter() {
 export default function createApp() {
   const app = createRouter();
   app.use(customLogger());
+  app.use("*", async (c, next) => {
+    const context = {
+      ip: extractClientIp((name) => c.req.header(name)),
+      userAgent: c.req.header("user-agent") ?? null,
+    };
+
+    await runWithRequestAuditContext(context, async () => {
+      await next();
+    });
+  });
   app.notFound(notFound);
   app.onError(onError);
   return app;

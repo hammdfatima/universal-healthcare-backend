@@ -1,14 +1,18 @@
+import type Stripe from 'stripe'
 import type { PaymentRecordStatus, User } from '~/generated/prisma'
+import { decryptPhiNullable } from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 import { getStripeClient } from '~/lib/stripe'
-import type Stripe from 'stripe'
 
 function getUserDisplayName(user: Pick<User, 'name' | 'firstName' | 'lastName' | 'email'>) {
-  if (user.name?.trim()) {
-    return user.name.trim()
+  const name = decryptPhiNullable(user.name)
+  if (name?.trim()) {
+    return name.trim()
   }
 
-  const parts = [user.firstName, user.lastName].filter(Boolean)
+  const parts = [decryptPhiNullable(user.firstName), decryptPhiNullable(user.lastName)].filter(
+    (part): part is string => Boolean(part)
+  )
 
   if (parts.length > 0) {
     return parts.join(' ')
@@ -67,27 +71,28 @@ function mapCheckoutPaymentStatus(
 
 function buildInvoiceNumber(prefix: string, identifier: string) {
   const year = new Date().getUTCFullYear()
-  const suffix = identifier.replace(/[^a-zA-Z0-9]/g, '').slice(-8).toUpperCase()
+  const suffix = identifier
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .slice(-8)
+    .toUpperCase()
 
   return `INV-${year}-${suffix || prefix}`
 }
 
-export function toAdminPaymentResponse(
-  payment: {
-    id: string
-    invoiceNumber: string
-    amountCents: number
-    currency: string
-    status: PaymentRecordStatus
-    billingCycle: string
-    paymentMethod: string | null
-    transactionId: string | null
-    paidAt: Date | null
-    createdAt: Date
-    user: Pick<User, 'email' | 'name' | 'firstName' | 'lastName'>
-    subscriptionPlan: { planName: string } | null
-  }
-) {
+export function toAdminPaymentResponse(payment: {
+  id: string
+  invoiceNumber: string
+  amountCents: number
+  currency: string
+  status: PaymentRecordStatus
+  billingCycle: string
+  paymentMethod: string | null
+  transactionId: string | null
+  paidAt: Date | null
+  createdAt: Date
+  user: Pick<User, 'email' | 'name' | 'firstName' | 'lastName'>
+  subscriptionPlan: { planName: string } | null
+}) {
   const paidAt = payment.paidAt ?? payment.createdAt
 
   return {
@@ -140,7 +145,7 @@ export async function upsertPaymentFromCheckoutSession(session: Stripe.Checkout.
   const transactionId =
     typeof session.payment_intent === 'string'
       ? session.payment_intent
-      : session.payment_intent?.id ?? session.id
+      : (session.payment_intent?.id ?? session.id)
 
   const paymentData = {
     userId,
@@ -158,10 +163,7 @@ export async function upsertPaymentFromCheckoutSession(session: Stripe.Checkout.
 
   const existing = await prisma.payment.findFirst({
     where: {
-      OR: [
-        { stripeCheckoutSessionId: session.id },
-        { transactionId },
-      ],
+      OR: [{ stripeCheckoutSessionId: session.id }, { transactionId }],
     },
   })
 
@@ -237,10 +239,8 @@ export async function upsertPaymentFromStripeInvoice(invoice: Stripe.Invoice) {
     subscription_details?: { metadata?: { userId?: string; planId?: string } }
   }
 
-  let userId =
-    invoice.metadata?.userId ?? stripe.subscription_details?.metadata?.userId ?? null
-  let planId =
-    invoice.metadata?.planId ?? stripe.subscription_details?.metadata?.planId ?? null
+  let userId = invoice.metadata?.userId ?? stripe.subscription_details?.metadata?.userId ?? null
+  const planId = invoice.metadata?.planId ?? stripe.subscription_details?.metadata?.planId ?? null
 
   if (!userId && invoice.customer_email) {
     const user = await prisma.user.findUnique({
@@ -269,7 +269,7 @@ export async function upsertPaymentFromStripeInvoice(invoice: Stripe.Invoice) {
   const transactionId =
     typeof invoice.payment_intent === 'string'
       ? invoice.payment_intent
-      : invoice.payment_intent?.id ?? invoice.id
+      : (invoice.payment_intent?.id ?? invoice.id)
 
   const paymentData = {
     userId,
