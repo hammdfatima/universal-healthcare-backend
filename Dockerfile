@@ -30,7 +30,7 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/tsconfig.json ./
 COPY --from=builder /app/zod.config.json ./
-COPY scripts/docker-start.sh ./scripts/docker-start.sh
+COPY scripts ./scripts
 
 RUN chmod +x ./scripts/docker-start.sh
 
