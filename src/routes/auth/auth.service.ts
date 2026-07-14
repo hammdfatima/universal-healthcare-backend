@@ -11,6 +11,7 @@ import {
 } from '~/lib/auth'
 import { sendPasswordResetEmail, sendSignInEmail, sendVerificationEmail } from '~/lib/email'
 import { HttpError } from '~/lib/error'
+import { assertManagedMemberHasHouseholdAccess } from '~/lib/household-access'
 import {
   buildOtpAuthUrl,
   decryptMfaSecret,
@@ -284,6 +285,10 @@ export async function loginUser(
     throw new HttpError('Please verify your email before logging in.', 403)
   }
 
+  if (user.managedByOwnerId) {
+    await assertManagedMemberHasHouseholdAccess(user.id)
+  }
+
   if (user.mfaEnabled && user.mfaSecret) {
     return {
       mfaRequired: true,
@@ -324,6 +329,10 @@ export async function verifyMfaLogin(
 
   if (user.isBlocked) {
     throw new HttpError('Your account has been blocked. Please contact support.', 403)
+  }
+
+  if (user.managedByOwnerId) {
+    await assertManagedMemberHasHouseholdAccess(user.id)
   }
 
   const secret = decryptMfaSecret(user.mfaSecret)

@@ -35,6 +35,21 @@ export const notificationIdParamSchema = z.object({
   }),
 })
 
+export const listNotificationsQuerySchema = z.object({
+  timezoneOffset: z.coerce
+    .number()
+    .int()
+    .min(-840)
+    .max(840)
+    .optional()
+    .openapi({
+      param: { name: 'timezoneOffset', in: 'query' },
+      example: -300,
+      description:
+        'Browser Date.getTimezoneOffset() value in minutes (local + offset = UTC).',
+    }),
+})
+
 export const messageResponseSchema = z
   .object({
     message: z.string(),

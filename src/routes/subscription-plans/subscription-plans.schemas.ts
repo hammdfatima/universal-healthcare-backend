@@ -11,6 +11,12 @@ export const subscriptionPlanBodySchema = z
       .array(z.string().min(1))
       .min(1)
       .openapi({ example: ['Unlimited health records', 'Emergency access QR'] }),
+    memberLimit: z
+      .number()
+      .int()
+      .min(0)
+      .openapi({ example: 6, description: 'Extra household seats beyond the account owner' }),
+    allowsPets: z.boolean().openapi({ example: true }),
   })
   .openapi('SubscriptionPlanBody')
 
@@ -28,6 +34,8 @@ export const subscriptionPlanSchema = z
     price: z.string(),
     billingCycle: billingCycleSchema,
     features: z.array(z.string()),
+    memberLimit: z.number().int(),
+    allowsPets: z.boolean(),
     createdAt: z.string(),
     updatedAt: z.string(),
   })

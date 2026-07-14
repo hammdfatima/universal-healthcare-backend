@@ -11,7 +11,7 @@ import {
   encryptPhiNullable,
   encryptPhiRequired,
 } from '~/lib/phi-crypto'
-import { getFamilyMemberLimit, getPlanTier, supportsFamilyMembers } from '~/lib/plan-tier'
+import { getFamilyMemberLimit, supportsPets } from '~/lib/plan-tier'
 import prisma from '~/lib/prisma'
 import { isSubscriptionActive } from '~/routes/subscriptions/subscriptions.service'
 
@@ -184,23 +184,37 @@ async function getOwnerWithSubscription(ownerId: string) {
   return owner
 }
 
-function assertOwnerCanManagePets(owner: Awaited<ReturnType<typeof getOwnerWithSubscription>>) {
+function assertOwnerHasActiveSubscription(
+  owner: Awaited<ReturnType<typeof getOwnerWithSubscription>>
+) {
   const subscription = owner.subscription
 
   if (!subscription || !isSubscriptionActive(subscription.status)) {
     throw new HttpError('An active subscription is required to manage pets.', 403)
   }
 
-  const tier = getPlanTier(subscription.subscriptionPlan.planName)
-
-  if (!supportsFamilyMembers(tier)) {
-    throw new HttpError('Your current plan does not include household pet profiles.', 403)
+  const capabilities = {
+    memberLimit: subscription.subscriptionPlan.memberLimit,
+    allowsPets: subscription.subscriptionPlan.allowsPets,
   }
 
   return {
-    tier,
-    limit: getFamilyMemberLimit(tier),
+    capabilities,
+    limit: getFamilyMemberLimit(capabilities),
   }
+}
+
+function assertOwnerCanManagePets(owner: Awaited<ReturnType<typeof getOwnerWithSubscription>>) {
+  const result = assertOwnerHasActiveSubscription(owner)
+
+  if (!supportsPets(result.capabilities)) {
+    throw new HttpError(
+      'Pet profiles are not included on your current plan. Upgrade to a plan that allows pets.',
+      403
+    )
+  }
+
+  return result
 }
 
 async function assertEmergencyContactBelongsToOwner(
@@ -270,22 +284,31 @@ function toPetWriteData(input: PetInput, emergencyContactFamilyMemberId: string 
 
 export async function listPets(ownerId: string) {
   const owner = await getOwnerWithSubscription(ownerId)
-  const { limit } = assertOwnerCanManagePets(owner)
+  const { capabilities, limit } = assertOwnerHasActiveSubscription(owner)
+  const seats = await countHouseholdSeats(ownerId)
 
-  const [pets, seats] = await Promise.all([
-    prisma.pet.findMany({
-      where: { ownerId },
-      include: {
-        emergencyContactFamilyMember: {
-          include: {
-            memberUser: true,
-          },
+  if (!supportsPets(capabilities)) {
+    return {
+      pets: [],
+      limit,
+      usedSeats: seats.usedSeats,
+      memberCount: seats.accessibleMemberCount,
+      pausedPetCount: seats.pausedPetCount,
+      supportsPets: false,
+    }
+  }
+
+  const pets = await prisma.pet.findMany({
+    where: { ownerId },
+    include: {
+      emergencyContactFamilyMember: {
+        include: {
+          memberUser: true,
         },
       },
-      orderBy: { createdAt: 'asc' },
-    }),
-    countHouseholdSeats(ownerId),
-  ])
+    },
+    orderBy: { createdAt: 'asc' },
+  })
 
   await writeAuditLog({
     action: AUDIT_ACTIONS.PHI_READ,
@@ -299,19 +322,19 @@ export async function listPets(ownerId: string) {
     limit,
     usedSeats: seats.usedSeats,
     memberCount: seats.memberCount,
+    pausedPetCount: 0,
+    supportsPets: true,
   }
 }
 
 export async function createPet(ownerId: string, input: PetInput) {
   const owner = await getOwnerWithSubscription(ownerId)
-  const { tier, limit } = assertOwnerCanManagePets(owner)
+  const { limit } = assertOwnerCanManagePets(owner)
   const seats = await countHouseholdSeats(ownerId)
 
   if (seats.usedSeats >= limit) {
     throw new HttpError(
-      tier === 'couple'
-        ? "Your couple's plan allows only one household profile (spouse or pet)."
-        : `Your family plan allows up to ${limit} household members including pets.`,
+      `Your family plan allows up to ${limit} household members including pets.`,
       400
     )
   }

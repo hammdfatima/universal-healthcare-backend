@@ -9,6 +9,8 @@ const paymentInclude = {
       name: true,
       firstName: true,
       lastName: true,
+      phone: true,
+      address: true,
     },
   },
   subscriptionPlan: {

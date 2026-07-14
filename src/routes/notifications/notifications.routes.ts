@@ -5,6 +5,7 @@ import { zodResponseSchema } from '~/lib/zod-helper'
 import {
   messageResponseSchema,
   notificationIdParamSchema,
+  listNotificationsQuerySchema,
   notificationSchema,
   notificationsListSchema,
 } from '~/routes/notifications/notifications.schemas'
@@ -16,6 +17,9 @@ export const NOTIFICATIONS_ROUTES = {
     path: '/notifications',
     summary: 'List in-app notifications',
     security: [{ bearerAuth: [] }],
+    request: {
+      query: listNotificationsQuerySchema,
+    },
     responses: {
       [HttpStatusCodes.OK]: jsonContent(
         zodResponseSchema(notificationsListSchema),

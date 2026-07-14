@@ -63,6 +63,8 @@ model SubscriptionPlan {
   price           String
   billingCycle    BillingCycle       @default(monthly)
   features        String[]
+  memberLimit     Int                @default(0)
+  allowsPets      Boolean            @default(false)
   stripeProductId String?            @unique
   stripePriceId   String?            @unique
   createdAt       DateTime           @default(now())
@@ -276,6 +278,8 @@ model Medication {
   condition    String
   prescribedBy String
   dosage       String
+  timesPerDay  Int       @default(1)
+  timesOfDay   String[]  @default([])
   startDate    DateTime
   endDate      DateTime?
   createdAt    DateTime  @default(now())

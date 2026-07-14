@@ -39,12 +39,16 @@ type StripePlanInput = {
   price: string
   billingCycle: BillingCycle
   features: string[]
+  memberLimit?: number
+  allowsPets?: boolean
 }
 
 function buildStripeMetadata(input: StripePlanInput) {
   return {
     billing_cycle: input.billingCycle,
     features: JSON.stringify(input.features),
+    member_limit: String(input.memberLimit ?? 0),
+    allows_pets: String(Boolean(input.allowsPets)),
   }
 }
 

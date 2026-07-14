@@ -12,8 +12,32 @@ type MedicationInput = {
   condition: string
   prescribedBy: string
   dosage: string
+  timesPerDay: number
+  timesOfDay: string[]
   startDate: string
   endDate?: string
+}
+
+const TIME_OF_DAY_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/
+
+function normalizeTimesOfDay(timesPerDay: number, timesOfDay: string[]): string[] {
+  if (!Number.isInteger(timesPerDay) || timesPerDay < 1 || timesPerDay > 6) {
+    throw new HttpError('Times per day must be between 1 and 6.', 400)
+  }
+
+  const normalized = timesOfDay.map(time => time.trim()).filter(Boolean)
+
+  if (normalized.length !== timesPerDay) {
+    throw new HttpError('Provide one dose time for each time per day.', 400)
+  }
+
+  for (const time of normalized) {
+    if (!TIME_OF_DAY_PATTERN.test(time)) {
+      throw new HttpError('Dose times must use HH:mm (24-hour) format.', 400)
+    }
+  }
+
+  return normalized
 }
 
 function formatMedicationDate(date: Date): string {
@@ -69,6 +93,8 @@ function toMedicationResponse(record: Medication) {
     condition: decryptPhi(record.condition),
     prescribedBy: decryptPhi(record.prescribedBy),
     dosage: decryptPhi(record.dosage),
+    timesPerDay: record.timesPerDay,
+    timesOfDay: record.timesOfDay,
     startDate: formatMedicationDate(record.startDate),
     endDate: record.endDate ? formatMedicationDate(record.endDate) : null,
     createdAt: record.createdAt.toISOString(),
@@ -118,6 +144,7 @@ export async function createMedication(userId: string, input: MedicationInput) {
 
   const startDate = parseMedicationDate(input.startDate, 'start date')
   const endDate = parseOptionalMedicationDate(input.endDate, 'end date')
+  const timesOfDay = normalizeTimesOfDay(input.timesPerDay, input.timesOfDay)
 
   if (endDate && endDate < startDate) {
     throw new HttpError('End date cannot be before start date.', 400)
@@ -130,6 +157,8 @@ export async function createMedication(userId: string, input: MedicationInput) {
       condition: encryptPhiRequired(input.condition.trim()),
       prescribedBy: encryptPhiRequired(input.prescribedBy.trim()),
       dosage: encryptPhiRequired(input.dosage.trim()),
+      timesPerDay: input.timesPerDay,
+      timesOfDay,
       startDate,
       endDate,
     },
@@ -159,6 +188,7 @@ export async function updateMedication(
 
   const startDate = parseMedicationDate(input.startDate, 'start date')
   const endDate = parseOptionalMedicationDate(input.endDate, 'end date')
+  const timesOfDay = normalizeTimesOfDay(input.timesPerDay, input.timesOfDay)
 
   if (endDate && endDate < startDate) {
     throw new HttpError('End date cannot be before start date.', 400)
@@ -171,6 +201,8 @@ export async function updateMedication(
       condition: encryptPhiRequired(input.condition.trim()),
       prescribedBy: encryptPhiRequired(input.prescribedBy.trim()),
       dosage: encryptPhiRequired(input.dosage.trim()),
+      timesPerDay: input.timesPerDay,
+      timesOfDay,
       startDate,
       endDate,
     },

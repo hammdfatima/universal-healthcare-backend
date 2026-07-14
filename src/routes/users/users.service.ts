@@ -2,8 +2,9 @@ import { USER_ROLES } from '~/config/roles'
 import type { SubscriptionStatus, User } from '~/generated/prisma'
 import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { HttpError } from '~/lib/error'
+import { assertManagedMemberHasHouseholdAccess } from '~/lib/household-access'
 import { decryptPhiNullable } from '~/lib/phi-crypto'
-import { getFamilyMemberLimit, getPlanTier, supportsFamilyMembers } from '~/lib/plan-tier'
+import { getFamilyMemberLimit, supportsFamilyMembers } from '~/lib/plan-tier'
 import prisma from '~/lib/prisma'
 import { isSubscriptionActive } from '~/routes/subscriptions/subscriptions.service'
 
@@ -14,6 +15,8 @@ type AdminUserRecord = User & {
     status: SubscriptionStatus
     subscriptionPlan: {
       planName: string
+      memberLimit: number
+      allowsPets: boolean
     }
   } | null
   managedByOwner: Pick<User, 'id' | 'email' | 'name' | 'firstName' | 'lastName'> | null
@@ -71,13 +74,18 @@ function buildFamilyMemberInfo(user: AdminUserRecord) {
     }
   }
 
-  const planName = user.subscription?.subscriptionPlan?.planName ?? null
-  const tier = getPlanTier(planName)
+  const plan = user.subscription?.subscriptionPlan
   const hasActiveSubscription = Boolean(
     user.subscription && isSubscriptionActive(user.subscription.status)
   )
-  const familyMemberLimit = hasActiveSubscription ? getFamilyMemberLimit(tier) : 0
-  const canAddFamilyMembers = hasActiveSubscription && supportsFamilyMembers(tier)
+  const capabilities = plan
+    ? { memberLimit: plan.memberLimit, allowsPets: plan.allowsPets }
+    : null
+  const familyMemberLimit = hasActiveSubscription
+    ? getFamilyMemberLimit(capabilities)
+    : 0
+  const canAddFamilyMembers =
+    hasActiveSubscription && supportsFamilyMembers(capabilities)
   const familyMembersRemaining = canAddFamilyMembers
     ? Math.max(0, familyMemberLimit - familyMemberCount)
     : 0
@@ -268,7 +276,12 @@ export async function unblockUser(userId: string, actorUserId?: string) {
 export async function assertUserNotBlocked(userId: string, tokenVersion?: number) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { isBlocked: true, role: true, tokenVersion: true },
+    select: {
+      isBlocked: true,
+      role: true,
+      tokenVersion: true,
+      managedByOwnerId: true,
+    },
   })
 
   if (!user) {
@@ -283,5 +296,9 @@ export async function assertUserNotBlocked(userId: string, tokenVersion?: number
 
   if (user.tokenVersion !== sessionTokenVersion) {
     throw new HttpError('Your session has expired. Please sign in again.', 401)
+  }
+
+  if (user.managedByOwnerId) {
+    await assertManagedMemberHasHouseholdAccess(userId)
   }
 }

@@ -18,7 +18,11 @@ export const NOTIFICATIONS_ROUTE_HANDLER: HandlerMapFromRoutes<
       throw new HttpError('Unauthorized', 401)
     }
 
-    const data = await listNotifications(authUser.user_id)
+    const query = c.req.valid('query')
+    const data = await listNotifications(
+      authUser.user_id,
+      query.timezoneOffset ?? 0
+    )
 
     return c.json(
       {

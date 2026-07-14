@@ -90,7 +90,7 @@ export function toAdminPaymentResponse(payment: {
   transactionId: string | null
   paidAt: Date | null
   createdAt: Date
-  user: Pick<User, 'email' | 'name' | 'firstName' | 'lastName'>
+  user: Pick<User, 'email' | 'name' | 'firstName' | 'lastName' | 'phone' | 'address'>
   subscriptionPlan: { planName: string } | null
 }) {
   const paidAt = payment.paidAt ?? payment.createdAt
@@ -100,11 +100,13 @@ export function toAdminPaymentResponse(payment: {
     invoiceNumber: payment.invoiceNumber,
     user: getUserDisplayName(payment.user),
     email: payment.user.email,
+    phone: decryptPhiNullable(payment.user.phone),
+    address: decryptPhiNullable(payment.user.address),
     plan: payment.subscriptionPlan?.planName ?? 'Subscription',
     amount: formatPaymentAmount(payment.amountCents, payment.currency),
     status: payment.status,
     date: formatPaymentDate(paidAt),
-    billingCycle: payment.billingCycle,
+    billingCycle: formatBillingCycleLabel(payment.billingCycle),
     paymentMethod: payment.paymentMethod ?? 'Card',
     transactionId: payment.transactionId ?? payment.id,
   }

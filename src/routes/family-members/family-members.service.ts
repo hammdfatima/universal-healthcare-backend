@@ -3,6 +3,9 @@ import type { FamilyMember, User } from '~/generated/prisma'
 import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { sendFamilyMemberWelcomeEmail } from '~/lib/email'
 import { HttpError } from '~/lib/error'
+import {
+  getCoveredMemberUserIdsFromLinks,
+} from '~/lib/household-access'
 import { countHouseholdSeats } from '~/lib/household-seats'
 import { hashPassword } from '~/lib/password'
 import {
@@ -11,7 +14,12 @@ import {
   encryptDateToPhi,
   encryptPhiRequired,
 } from '~/lib/phi-crypto'
-import { getFamilyMemberLimit, getPlanTier, supportsFamilyMembers } from '~/lib/plan-tier'
+import type { PlanCapabilities } from '~/lib/plan-tier'
+import {
+  getFamilyMemberLimit,
+  supportsFamilyMembers,
+  supportsPets,
+} from '~/lib/plan-tier'
 import prisma from '~/lib/prisma'
 import { isSubscriptionActive } from '~/routes/subscriptions/subscriptions.service'
 
@@ -79,10 +87,7 @@ function parseDateOfBirth(value: string): Date {
   return parsed
 }
 
-function assertHumanRelationship(
-  relationship: string,
-  tier: 'couple' | 'family' | 'individual' | null
-) {
+function assertHumanRelationship(relationship: string, memberLimit: number) {
   const normalized = relationship.trim()
 
   if (normalized.toLowerCase() === 'pet') {
@@ -92,9 +97,9 @@ function assertHumanRelationship(
     )
   }
 
-  if (tier === 'couple') {
+  if (memberLimit === 1) {
     if (normalized !== 'Spouse') {
-      throw new HttpError('Couple plans can only add a spouse profile.', 400)
+      throw new HttpError('This plan can only add a spouse profile.', 400)
     }
     return 'Spouse'
   }
@@ -112,7 +117,8 @@ function assertHumanRelationship(
 function toFamilyMemberResponse(
   record: FamilyMember & {
     memberUser: User
-  }
+  },
+  isAccessible: boolean
 ) {
   return {
     id: record.id,
@@ -124,6 +130,7 @@ function toFamilyMemberResponse(
     relationship: record.relationship,
     dateOfBirth: formatDateOfBirth(decryptDateNullable(record.memberUser.dateOfBirth)),
     isEmergencyContact: record.isEmergencyContact,
+    isAccessible,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
   }
@@ -156,24 +163,35 @@ async function getOwnerWithSubscription(ownerId: string) {
   return owner
 }
 
-function assertOwnerCanManageFamily(owner: Awaited<ReturnType<typeof getOwnerWithSubscription>>) {
+function assertOwnerHasActiveSubscription(
+  owner: Awaited<ReturnType<typeof getOwnerWithSubscription>>
+) {
   const subscription = owner.subscription
 
   if (!subscription || !isSubscriptionActive(subscription.status)) {
     throw new HttpError('An active subscription is required to manage family members.', 403)
   }
 
-  const tier = getPlanTier(subscription.subscriptionPlan.planName)
-
-  if (!supportsFamilyMembers(tier)) {
-    throw new HttpError('Your current plan does not include family member profiles.', 403)
+  const capabilities: PlanCapabilities = {
+    memberLimit: subscription.subscriptionPlan.memberLimit,
+    allowsPets: subscription.subscriptionPlan.allowsPets,
   }
 
   return {
-    tier,
-    limit: getFamilyMemberLimit(tier),
+    capabilities,
+    limit: getFamilyMemberLimit(capabilities),
     subscription,
   }
+}
+
+function assertOwnerCanManageFamily(owner: Awaited<ReturnType<typeof getOwnerWithSubscription>>) {
+  const result = assertOwnerHasActiveSubscription(owner)
+
+  if (!supportsFamilyMembers(result.capabilities)) {
+    throw new HttpError('Your current plan does not include family member profiles.', 403)
+  }
+
+  return result
 }
 
 async function getOwnedFamilyMember(ownerId: string, familyMemberId: string) {
@@ -196,7 +214,7 @@ async function getOwnedFamilyMember(ownerId: string, familyMemberId: string) {
 
 export async function listFamilyMembers(ownerId: string) {
   const owner = await getOwnerWithSubscription(ownerId)
-  const { limit } = assertOwnerCanManageFamily(owner)
+  const { capabilities, limit } = assertOwnerHasActiveSubscription(owner)
 
   const [members, seats] = await Promise.all([
     prisma.familyMember.findMany({
@@ -206,6 +224,16 @@ export async function listFamilyMembers(ownerId: string) {
     }),
     countHouseholdSeats(ownerId),
   ])
+
+  const covered = getCoveredMemberUserIdsFromLinks(
+    limit,
+    members.map(member => ({
+      memberUserId: member.memberUserId,
+      relationship: member.relationship,
+      createdAt: member.createdAt,
+    }))
+  )
+
   await writeAuditLog({
     action: AUDIT_ACTIONS.PHI_READ,
     actorUserId: ownerId,
@@ -214,27 +242,45 @@ export async function listFamilyMembers(ownerId: string) {
   })
 
   return {
-    members: members.map(toFamilyMemberResponse),
+    members: members.map(member =>
+      toFamilyMemberResponse(member, covered.has(member.memberUserId))
+    ),
     limit,
     usedSeats: seats.usedSeats,
     petCount: seats.petCount,
+    pausedPetCount: seats.pausedPetCount,
+    canManage: supportsFamilyMembers(capabilities),
+    supportsPets: supportsPets(capabilities),
   }
 }
 
 export async function createFamilyMember(ownerId: string, input: CreateFamilyMemberInput) {
   const owner = await getOwnerWithSubscription(ownerId)
-  const { tier, limit, subscription } = assertOwnerCanManageFamily(owner)
-  const relationship = assertHumanRelationship(input.relationship, tier)
+  const { limit, subscription } = assertOwnerCanManageFamily(owner)
+  const relationship = assertHumanRelationship(input.relationship, limit)
 
   const seats = await countHouseholdSeats(ownerId)
 
   if (seats.usedSeats >= limit) {
     throw new HttpError(
-      tier === 'couple'
-        ? "Your couple's plan allows only one household profile (spouse or pet)."
-        : `Your family plan allows up to ${limit} household members including pets.`,
+      limit === 1
+        ? 'Your plan allows only one spouse profile.'
+        : `Your plan allows up to ${limit} household members including pets.`,
       400
     )
+  }
+
+  if (limit === 1) {
+    const existingSpouse = await prisma.familyMember.findFirst({
+      where: {
+        ownerId,
+        relationship: 'Spouse',
+      },
+    })
+
+    if (existingSpouse) {
+      throw new HttpError('Your plan already includes a spouse profile.', 400)
+    }
   }
 
   const email = input.email.toLowerCase().trim()
@@ -306,7 +352,7 @@ export async function createFamilyMember(ownerId: string, input: CreateFamilyMem
     resourceId: record.id,
   })
 
-  return toFamilyMemberResponse(record)
+  return toFamilyMemberResponse(record, true)
 }
 
 export async function updateFamilyMember(
@@ -315,9 +361,23 @@ export async function updateFamilyMember(
   input: UpdateFamilyMemberInput
 ) {
   const owner = await getOwnerWithSubscription(ownerId)
-  const { tier } = assertOwnerCanManageFamily(owner)
+  const { limit } = assertOwnerCanManageFamily(owner)
   const record = await getOwnedFamilyMember(ownerId, familyMemberId)
-  const relationship = assertHumanRelationship(input.relationship, tier)
+
+  const links = await prisma.familyMember.findMany({
+    where: { ownerId },
+    select: { memberUserId: true, relationship: true, createdAt: true },
+  })
+  const covered = getCoveredMemberUserIdsFromLinks(limit, links)
+
+  if (!covered.has(record.memberUserId)) {
+    throw new HttpError(
+      'This family profile is paused on your current plan. Upgrade to edit it.',
+      403
+    )
+  }
+
+  const relationship = assertHumanRelationship(input.relationship, limit)
 
   const firstName = input.firstName.trim()
   const lastName = input.lastName.trim()
@@ -354,12 +414,13 @@ export async function updateFamilyMember(
     resourceId: record.id,
   })
 
-  return toFamilyMemberResponse(updated)
+  return toFamilyMemberResponse(updated, true)
 }
 
 export async function deleteFamilyMember(ownerId: string, familyMemberId: string) {
   const owner = await getOwnerWithSubscription(ownerId)
-  assertOwnerCanManageFamily(owner)
+  // Allow delete even on Individual so owners can permanently unlink paused members.
+  assertOwnerHasActiveSubscription(owner)
 
   const record = await getOwnedFamilyMember(ownerId, familyMemberId)
 

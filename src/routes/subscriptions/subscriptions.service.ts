@@ -1,6 +1,8 @@
 import type { SubscriptionStatus, UserSubscription } from '~/generated/prisma'
 import { USER_ROLES } from '~/config/roles'
+import { ensureCurrencyPrice } from '~/lib/currency'
 import { HttpError } from '~/lib/error'
+import { syncHouseholdAccessAfterPlanChange } from '~/lib/household-access'
 import prisma from '~/lib/prisma'
 import {
   constructStripeWebhookEvent,
@@ -43,13 +45,17 @@ function toPlanSummary(plan: {
   price: string
   billingCycle: 'monthly' | 'yearly'
   features: string[]
+  memberLimit: number
+  allowsPets: boolean
 }) {
   return {
     id: plan.id,
     planName: plan.planName,
-    price: plan.price,
+    price: ensureCurrencyPrice(plan.price),
     billingCycle: plan.billingCycle,
     features: plan.features,
+    memberLimit: plan.memberLimit,
+    allowsPets: plan.allowsPets,
   }
 }
 
@@ -61,6 +67,8 @@ function toSubscriptionResponse(
       price: string
       billingCycle: 'monthly' | 'yearly'
       features: string[]
+      memberLimit: number
+      allowsPets: boolean
     }
   }
 ) {
@@ -231,6 +239,8 @@ async function upsertSubscriptionFromStripe(
     userId,
     planId
   ).catch(() => undefined)
+
+  await syncHouseholdAccessAfterPlanChange(userId)
 
   return toSubscriptionResponse(subscription)
 }

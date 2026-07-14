@@ -31,6 +31,29 @@ function getCurrentMonthRange() {
   return getMonthRange(now.getUTCFullYear(), now.getUTCMonth())
 }
 
+/** Parse stored plan price strings like "$9.95" or "9.95" into cents. */
+function parsePlanPriceToCents(price: string): number {
+  const normalized = price.replace(/[^0-9.]/g, '')
+  const amount = Number.parseFloat(normalized)
+
+  if (!Number.isFinite(amount) || amount < 0) {
+    return 0
+  }
+
+  return Math.round(amount * 100)
+}
+
+/** Monthly recurring contribution in cents for one plan price + cycle. */
+function toMonthlyRevenueCents(price: string, billingCycle: string): number {
+  const cents = parsePlanPriceToCents(price)
+
+  if (billingCycle === 'yearly') {
+    return Math.round(cents / 12)
+  }
+
+  return cents
+}
+
 export async function getAdminDashboardStats() {
   const now = new Date()
   const year = now.getUTCFullYear()
@@ -38,17 +61,29 @@ export async function getAdminDashboardStats() {
 
   const [
     totalUsers,
-    activeSubscriptions,
+    activeOwnerSubscriptions,
     paymentsThisMonth,
-    monthlyRevenueAggregate,
     yearPayments,
   ] = await Promise.all([
     prisma.user.count({
       where: { role: USER_ROLES.USER },
     }),
-    prisma.userSubscription.count({
+    // Paying account owners only (exclude family member snapshot subscriptions).
+    prisma.userSubscription.findMany({
       where: {
         status: { in: [...ACTIVE_SUBSCRIPTION_STATUSES] },
+        user: {
+          role: USER_ROLES.USER,
+          managedByOwnerId: null,
+        },
+      },
+      select: {
+        subscriptionPlan: {
+          select: {
+            price: true,
+            billingCycle: true,
+          },
+        },
       },
     }),
     prisma.payment.count({
@@ -58,18 +93,6 @@ export async function getAdminDashboardStats() {
           gte: monthStart,
           lt: monthEnd,
         },
-      },
-    }),
-    prisma.payment.aggregate({
-      where: {
-        status: 'paid',
-        paidAt: {
-          gte: monthStart,
-          lt: monthEnd,
-        },
-      },
-      _sum: {
-        amountCents: true,
       },
     }),
     prisma.payment.findMany({
@@ -87,9 +110,18 @@ export async function getAdminDashboardStats() {
     }),
   ])
 
-  const monthlyRevenueCents = monthlyRevenueAggregate._sum.amountCents ?? 0
+  const activeSubscriptions = activeOwnerSubscriptions.length
+  const monthlyRevenueCents = activeOwnerSubscriptions.reduce(
+    (total, subscription) =>
+      total +
+      toMonthlyRevenueCents(
+        subscription.subscriptionPlan.price,
+        subscription.subscriptionPlan.billingCycle
+      ),
+    0
+  )
 
-  const chartBuckets = MONTH_LABELS.map((month, monthIndex) => ({
+  const chartBuckets = MONTH_LABELS.map((month) => ({
     month,
     revenue: 0,
     payments: 0,

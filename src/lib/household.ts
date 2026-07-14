@@ -1,3 +1,4 @@
+import { getCoveredMemberUserIds } from '~/lib/household-access'
 import { decryptPhiNullable } from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 
@@ -23,8 +24,31 @@ function displayParts(user: {
 }
 
 /**
- * Returns other people in the same household (owner + linked family members),
- * excluding the requesting user. Works for both account owners and managed members.
+ * FamilyMember.relationship is stored from the owner's POV
+ * ("this member is my Child"). For the member viewing the owner, return the inverse.
+ */
+export function reciprocalRelationship(relationship: string): string {
+  const normalized = relationship.trim().toLowerCase()
+
+  switch (normalized) {
+    case 'spouse':
+      return 'Spouse'
+    case 'child':
+      return 'Parent'
+    case 'parent':
+      return 'Child'
+    case 'sibling':
+      return 'Sibling'
+    default: {
+      const trimmed = relationship.trim()
+      return trimmed || 'Family'
+    }
+  }
+}
+
+/**
+ * Returns other people in the same household (owner + covered family members),
+ * excluding the requesting user. Soft-hidden members (plan seat exceeded) are omitted.
  */
 export async function getHouseholdMembers(userId: string): Promise<HouseholdMember[]> {
   const user = await prisma.user.findUnique({
@@ -40,6 +64,12 @@ export async function getHouseholdMembers(userId: string): Promise<HouseholdMemb
   }
 
   const ownerId = user.managedByOwnerId ?? user.id
+  const covered = await getCoveredMemberUserIds(ownerId)
+
+  // Managed members who lost coverage should not see household peers.
+  if (user.managedByOwnerId && !covered.has(userId)) {
+    return []
+  }
 
   const [owner, links] = await Promise.all([
     prisma.user.findUnique({
@@ -70,19 +100,26 @@ export async function getHouseholdMembers(userId: string): Promise<HouseholdMemb
   const members: HouseholdMember[] = []
 
   if (owner && owner.id !== userId) {
+    const viewerLink = links.find(link => link.memberUserId === userId)
     const parts = displayParts(owner)
     members.push({
       userId: owner.id,
       firstName: parts.firstName,
       lastName: parts.lastName,
       email: parts.email,
-      relationship: 'Account Owner',
+      relationship: viewerLink
+        ? reciprocalRelationship(viewerLink.relationship)
+        : 'Family',
       isAccountOwner: true,
     })
   }
 
   for (const link of links) {
     if (link.memberUserId === userId) {
+      continue
+    }
+
+    if (!covered.has(link.memberUserId)) {
       continue
     }
 
@@ -102,7 +139,7 @@ export async function getHouseholdMembers(userId: string): Promise<HouseholdMemb
 
 /**
  * People the current user may share medical records with.
- * Account owners: all household members.
+ * Account owners: covered household members only.
  * Managed family members: only the account owner who added them.
  */
 export async function getSharingRecipients(userId: string): Promise<HouseholdMember[]> {
@@ -127,7 +164,7 @@ export async function getSharingRecipients(userId: string): Promise<HouseholdMem
 /**
  * People shown in the sidebar family list.
  * Same rules as sharing recipients for managed members (owner only).
- * Account owners see every linked family member.
+ * Account owners see every covered family member.
  */
 export async function getSidebarFamilyMembers(userId: string): Promise<HouseholdMember[]> {
   return getSharingRecipients(userId)
@@ -156,5 +193,15 @@ export async function areUsersInSameHousehold(userAId: string, userBId: string):
   const ownerA = userA.managedByOwnerId ?? userA.id
   const ownerB = userB.managedByOwnerId ?? userB.id
 
-  return ownerA === ownerB
+  if (ownerA !== ownerB) {
+    return false
+  }
+
+  const covered = await getCoveredMemberUserIds(ownerA)
+
+  // Owner is always in household; members must be covered.
+  const aOk = !userA.managedByOwnerId || covered.has(userAId)
+  const bOk = !userB.managedByOwnerId || covered.has(userBId)
+
+  return aOk && bOk
 }

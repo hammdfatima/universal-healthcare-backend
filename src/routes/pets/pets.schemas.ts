@@ -59,6 +59,8 @@ export const petsListSchema = z
     limit: z.number().int(),
     usedSeats: z.number().int(),
     memberCount: z.number().int(),
+    pausedPetCount: z.number().int(),
+    supportsPets: z.boolean(),
   })
   .openapi('PetsList')
 

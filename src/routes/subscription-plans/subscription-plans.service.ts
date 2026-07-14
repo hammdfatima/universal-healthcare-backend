@@ -1,5 +1,7 @@
 import type { SubscriptionPlan } from '~/generated/prisma'
+import { ensureCurrencyPrice } from '~/lib/currency'
 import { HttpError } from '~/lib/error'
+import { syncHouseholdAccessAfterPlanChange } from '~/lib/household-access'
 import prisma from '~/lib/prisma'
 import {
   archiveStripeSubscriptionPlan,
@@ -12,14 +14,18 @@ type SubscriptionPlanInput = {
   price: string
   billingCycle: 'monthly' | 'yearly'
   features: string[]
+  memberLimit: number
+  allowsPets: boolean
 }
 
 function normalizeInput(input: SubscriptionPlanInput): SubscriptionPlanInput {
   return {
     planName: input.planName.trim(),
-    price: input.price.trim(),
+    price: ensureCurrencyPrice(input.price.trim()),
     billingCycle: input.billingCycle,
     features: input.features.map(feature => feature.trim()).filter(Boolean),
+    memberLimit: Math.max(0, Math.floor(input.memberLimit)),
+    allowsPets: Boolean(input.allowsPets),
   }
 }
 
@@ -27,9 +33,11 @@ function toSubscriptionPlanResponse(plan: SubscriptionPlan) {
   return {
     id: plan.id,
     planName: plan.planName,
-    price: plan.price,
+    price: ensureCurrencyPrice(plan.price),
     billingCycle: plan.billingCycle,
     features: plan.features,
+    memberLimit: plan.memberLimit,
+    allowsPets: plan.allowsPets,
     createdAt: plan.createdAt.toISOString(),
     updatedAt: plan.updatedAt.toISOString(),
   }
@@ -87,6 +95,24 @@ export async function updateSubscriptionPlan(id: string, input: SubscriptionPlan
     },
   })
 
+  const seatConfigChanged =
+    existing.memberLimit !== normalized.memberLimit ||
+    existing.allowsPets !== normalized.allowsPets
+
+  if (seatConfigChanged) {
+    const subscribers = await prisma.userSubscription.findMany({
+      where: {
+        subscriptionPlanId: plan.id,
+        user: { managedByOwnerId: null },
+      },
+      select: { userId: true },
+    })
+
+    await Promise.all(
+      subscribers.map(subscriber => syncHouseholdAccessAfterPlanChange(subscriber.userId))
+    )
+  }
+
   return toSubscriptionPlanResponse(plan)
 }
 
@@ -95,6 +121,25 @@ export async function deleteSubscriptionPlan(id: string) {
 
   if (!existing) {
     throw new HttpError('Subscription plan not found.', 404)
+  }
+
+  const [subscriptionCount, paymentCount] = await Promise.all([
+    prisma.userSubscription.count({ where: { subscriptionPlanId: id } }),
+    prisma.payment.count({ where: { subscriptionPlanId: id } }),
+  ])
+
+  if (subscriptionCount > 0) {
+    throw new HttpError(
+      'There are active subscriptions on this plan. You cannot delete this plan.',
+      409
+    )
+  }
+
+  if (paymentCount > 0) {
+    throw new HttpError(
+      'This plan has payment history and cannot be deleted.',
+      409
+    )
   }
 
   await archiveStripeSubscriptionPlan(existing.stripeProductId, existing.stripePriceId)

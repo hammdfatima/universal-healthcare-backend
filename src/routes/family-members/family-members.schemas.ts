@@ -12,6 +12,7 @@ export const familyMemberSchema = z
     relationship: z.string(),
     dateOfBirth: z.string().nullable(),
     isEmergencyContact: z.boolean(),
+    isAccessible: z.boolean(),
     createdAt: z.string(),
     updatedAt: z.string(),
   })
@@ -23,6 +24,9 @@ export const familyMembersListSchema = z
     limit: z.number().int(),
     usedSeats: z.number().int(),
     petCount: z.number().int(),
+    pausedPetCount: z.number().int(),
+    canManage: z.boolean(),
+    supportsPets: z.boolean(),
   })
   .openapi('FamilyMembersList')
 

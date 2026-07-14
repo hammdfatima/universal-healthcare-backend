@@ -17,6 +17,8 @@ export const subscriptionPlanSummarySchema = z
     price: z.string(),
     billingCycle: billingCycleSchema,
     features: z.array(z.string()),
+    memberLimit: z.number().int(),
+    allowsPets: z.boolean(),
   })
   .openapi('SubscriptionPlanSummary')
 

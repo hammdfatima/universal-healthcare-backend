@@ -8,6 +8,8 @@ export const adminPaymentSchema = z
     invoiceNumber: z.string(),
     user: z.string(),
     email: z.string().email(),
+    phone: z.string().nullable(),
+    address: z.string().nullable(),
     plan: z.string(),
     amount: z.string(),
     status: paymentStatusSchema,
