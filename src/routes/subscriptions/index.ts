@@ -15,6 +15,7 @@ router.use('/subscriptions/checkout', requirePatient)
 router.use('/subscriptions/checkout/*', requirePatient)
 router.use('/subscriptions/cancel', requirePatient)
 router.use('/subscriptions/change-plan', requirePatient)
+router.use('/subscriptions/change-plan/*', requirePatient)
 
 router
   .openapi(SUBSCRIPTION_ROUTES.getMe, SUBSCRIPTION_ROUTE_HANDLER.getMe)
@@ -29,6 +30,10 @@ router
   .openapi(
     SUBSCRIPTION_ROUTES.cancelSubscription,
     SUBSCRIPTION_ROUTE_HANDLER.cancelSubscription
+  )
+  .openapi(
+    SUBSCRIPTION_ROUTES.previewChangePlan,
+    SUBSCRIPTION_ROUTE_HANDLER.previewChangePlan
   )
   .openapi(SUBSCRIPTION_ROUTES.changePlan, SUBSCRIPTION_ROUTE_HANDLER.changePlan)
 

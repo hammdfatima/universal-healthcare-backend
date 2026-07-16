@@ -29,6 +29,8 @@ export const userSubscriptionSchema = z
     currentPeriodEnd: z.string().nullable(),
     cancelAtPeriodEnd: z.boolean(),
     plan: subscriptionPlanSummarySchema,
+    scheduledPlan: subscriptionPlanSummarySchema.nullable().optional(),
+    scheduledPlanChangeAt: z.string().nullable().optional(),
   })
   .openapi('UserSubscription')
 
@@ -47,17 +49,59 @@ export const checkoutBodySchema = z
 
 export const changePlanBodySchema = checkoutBodySchema.openapi('ChangePlanBody')
 
+export const changeTypeSchema = z.enum([
+  'upgrade',
+  'downgrade',
+  'reactivate',
+  'new',
+])
+
+export const changePlanPreviewSchema = z
+  .object({
+    mode: z.enum(['updated', 'scheduled', 'checkout']),
+    changeType: changeTypeSchema,
+    currentPlan: subscriptionPlanSummarySchema.nullable(),
+    targetPlan: subscriptionPlanSummarySchema,
+    amountDueCents: z.number().int(),
+    amountDueFormatted: z.string(),
+    creditCents: z.number().int(),
+    creditFormatted: z.string().nullable(),
+    effectiveAt: z.string().nullable(),
+    summary: z.string(),
+  })
+  .openapi('ChangePlanPreview')
+
 export const changePlanResponseSchema = z
   .discriminatedUnion('mode', [
     z.object({
       mode: z.literal('updated'),
+      changeType: changeTypeSchema,
+      amountDueCents: z.number().int(),
+      amountDueFormatted: z.string(),
+      effectiveAt: z.string().nullable(),
       subscription: userSubscriptionSchema,
       isActive: z.boolean(),
+      summary: z.string(),
+    }),
+    z.object({
+      mode: z.literal('scheduled'),
+      changeType: changeTypeSchema,
+      amountDueCents: z.number().int(),
+      amountDueFormatted: z.string(),
+      effectiveAt: z.string().nullable(),
+      subscription: userSubscriptionSchema,
+      isActive: z.boolean(),
+      summary: z.string(),
     }),
     z.object({
       mode: z.literal('checkout'),
+      changeType: changeTypeSchema,
+      amountDueCents: z.number().int(),
+      amountDueFormatted: z.string(),
+      effectiveAt: z.string().nullable(),
       checkoutUrl: z.string().url(),
       sessionId: z.string(),
+      summary: z.string(),
     }),
   ])
   .openapi('ChangePlanResponse')

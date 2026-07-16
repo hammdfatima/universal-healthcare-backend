@@ -31,99 +31,61 @@ function getCurrentMonthRange() {
   return getMonthRange(now.getUTCFullYear(), now.getUTCMonth())
 }
 
-/** Parse stored plan price strings like "$9.95" or "9.95" into cents. */
-function parsePlanPriceToCents(price: string): number {
-  const normalized = price.replace(/[^0-9.]/g, '')
-  const amount = Number.parseFloat(normalized)
-
-  if (!Number.isFinite(amount) || amount < 0) {
-    return 0
-  }
-
-  return Math.round(amount * 100)
-}
-
-/** Monthly recurring contribution in cents for one plan price + cycle. */
-function toMonthlyRevenueCents(price: string, billingCycle: string): number {
-  const cents = parsePlanPriceToCents(price)
-
-  if (billingCycle === 'yearly') {
-    return Math.round(cents / 12)
-  }
-
-  return cents
-}
-
 export async function getAdminDashboardStats() {
   const now = new Date()
   const year = now.getUTCFullYear()
   const { start: monthStart, end: monthEnd } = getCurrentMonthRange()
 
-  const [
-    totalUsers,
-    activeOwnerSubscriptions,
-    paymentsThisMonth,
-    yearPayments,
-  ] = await Promise.all([
-    prisma.user.count({
-      where: { role: USER_ROLES.USER },
-    }),
-    // Paying account owners only (exclude family member snapshot subscriptions).
-    prisma.userSubscription.findMany({
-      where: {
-        status: { in: [...ACTIVE_SUBSCRIPTION_STATUSES] },
-        user: {
-          role: USER_ROLES.USER,
-          managedByOwnerId: null,
-        },
-      },
-      select: {
-        subscriptionPlan: {
-          select: {
-            price: true,
-            billingCycle: true,
+  const [totalUsers, activeSubscriptions, monthPayments, yearPayments] =
+    await Promise.all([
+      prisma.user.count({
+        where: { role: USER_ROLES.USER },
+      }),
+      // Paying account owners only (exclude family member snapshot subscriptions).
+      prisma.userSubscription.count({
+        where: {
+          status: { in: [...ACTIVE_SUBSCRIPTION_STATUSES] },
+          user: {
+            role: USER_ROLES.USER,
+            managedByOwnerId: null,
           },
         },
-      },
-    }),
-    prisma.payment.count({
-      where: {
-        status: 'paid',
-        paidAt: {
-          gte: monthStart,
-          lt: monthEnd,
+      }),
+      prisma.payment.findMany({
+        where: {
+          status: 'paid',
+          paidAt: {
+            gte: monthStart,
+            lt: monthEnd,
+          },
         },
-      },
-    }),
-    prisma.payment.findMany({
-      where: {
-        status: 'paid',
-        paidAt: {
-          gte: new Date(Date.UTC(year, 0, 1)),
-          lt: new Date(Date.UTC(year + 1, 0, 1)),
+        select: {
+          amountCents: true,
         },
-      },
-      select: {
-        amountCents: true,
-        paidAt: true,
-      },
-    }),
-  ])
+      }),
+      prisma.payment.findMany({
+        where: {
+          status: 'paid',
+          paidAt: {
+            gte: new Date(Date.UTC(year, 0, 1)),
+            lt: new Date(Date.UTC(year + 1, 0, 1)),
+          },
+        },
+        select: {
+          amountCents: true,
+          paidAt: true,
+        },
+      }),
+    ])
 
-  const activeSubscriptions = activeOwnerSubscriptions.length
-  const monthlyRevenueCents = activeOwnerSubscriptions.reduce(
-    (total, subscription) =>
-      total +
-      toMonthlyRevenueCents(
-        subscription.subscriptionPlan.price,
-        subscription.subscriptionPlan.billingCycle
-      ),
+  const monthlyRevenueCents = monthPayments.reduce(
+    (total, payment) => total + payment.amountCents,
     0
   )
 
   const chartBuckets = MONTH_LABELS.map((month) => ({
     month,
-    revenue: 0,
+    revenueCents: 0,
     payments: 0,
   }))
 
@@ -131,7 +93,7 @@ export async function getAdminDashboardStats() {
     if (!payment.paidAt) continue
 
     const monthIndex = payment.paidAt.getUTCMonth()
-    chartBuckets[monthIndex].revenue += payment.amountCents / 100
+    chartBuckets[monthIndex].revenueCents += payment.amountCents
     chartBuckets[monthIndex].payments += 1
   }
 
@@ -140,8 +102,12 @@ export async function getAdminDashboardStats() {
       totalUsers,
       activeSubscriptions,
       monthlyRevenue: formatPaymentAmount(monthlyRevenueCents),
-      paymentsThisMonth,
+      paymentsThisMonth: monthPayments.length,
     },
-    paymentsChart: chartBuckets,
+    paymentsChart: chartBuckets.map(({ month, revenueCents, payments }) => ({
+      month,
+      revenue: revenueCents / 100,
+      payments,
+    })),
   }
 }

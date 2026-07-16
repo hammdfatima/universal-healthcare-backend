@@ -180,7 +180,13 @@ export async function syncScheduledNotifications(
 
     for (const doseTime of doseTimes) {
       const scheduledMinutes = parseTimeToMinutes(doseTime)
-      if (scheduledMinutes === null || localClock.minutesOfDay < scheduledMinutes) {
+      if (scheduledMinutes === null) {
+        continue
+      }
+
+      // Create once the local clock reaches this dose time (exact minute or later).
+      // Client-side timers call this sync at the exact second for on-time delivery.
+      if (localClock.minutesOfDay < scheduledMinutes) {
         continue
       }
 
@@ -191,7 +197,7 @@ export async function syncScheduledNotifications(
         type: 'medication',
         title: `Time for your ${timeLabel} dose`,
         message: `It's ${timeLabel} — take ${medicineName} (${dosage}).`,
-        href: '/patient/medications',
+        href: '/patient/health-record?tab=medications',
         dedupeKey: `medication:dose:${medication.id}:${localClock.dayKey}:${doseTime}`,
       })
     }
@@ -207,7 +213,7 @@ export async function syncScheduledNotifications(
         type: 'vaccination',
         title: 'Vaccination overdue',
         message: `Your ${decryptPhi(vaccination.vaccineName)} booster is overdue.`,
-        href: '/patient/vaccinations',
+        href: '/patient/health-record',
         dedupeKey: `vaccination:overdue:${vaccination.id}`,
       })
       continue
@@ -221,7 +227,7 @@ export async function syncScheduledNotifications(
         type: 'vaccination',
         title: 'Vaccination due soon',
         message: `Your ${decryptPhi(vaccination.vaccineName)} booster is due ${dayLabel}.`,
-        href: '/patient/vaccinations',
+        href: '/patient/health-record?tab=immunizations',
         dedupeKey: `vaccination:due:${vaccination.id}:${daysUntilDue}`,
       })
     }
@@ -293,7 +299,7 @@ export async function notifyMedicationAdded(
     type: 'medication',
     title: 'Medication added',
     message: `${medication.medicineName} (${medication.dosage}) was added to your records.`,
-    href: '/patient/medications',
+    href: '/patient/health-record',
     dedupeKey: `medication:added:${medication.id}`,
   })
 }
@@ -307,7 +313,7 @@ export async function notifyMedicationDiscontinued(
     type: 'medication',
     title: 'Medication discontinued',
     message: `${medication.medicineName} was marked as discontinued.`,
-    href: '/patient/medications',
+    href: '/patient/health-record',
     dedupeKey: `medication:discontinued:${medication.id}:${Date.now()}`,
   })
 }
@@ -321,7 +327,7 @@ export async function notifyVaccinationAdded(
     type: 'vaccination',
     title: 'Vaccination recorded',
     message: `${vaccination.vaccineName} was added to your vaccination history.`,
-    href: '/patient/vaccinations',
+    href: '/patient/health-record?tab=immunizations',
     dedupeKey: `vaccination:added:${vaccination.id}`,
   })
 }

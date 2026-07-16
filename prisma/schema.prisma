@@ -58,19 +58,20 @@ enum NotificationType {
 }
 
 model SubscriptionPlan {
-  id              String             @id @default(cuid())
-  planName        String
-  price           String
-  billingCycle    BillingCycle       @default(monthly)
-  features        String[]
-  memberLimit     Int                @default(0)
-  allowsPets      Boolean            @default(false)
-  stripeProductId String?            @unique
-  stripePriceId   String?            @unique
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
-  subscriptions   UserSubscription[]
-  payments        Payment[]
+  id                   String             @id @default(cuid())
+  planName             String
+  price                String
+  billingCycle         BillingCycle       @default(monthly)
+  features             String[]
+  memberLimit          Int                @default(0)
+  allowsPets           Boolean            @default(false)
+  stripeProductId      String?            @unique
+  stripePriceId        String?            @unique
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  subscriptions        UserSubscription[]
+  scheduledForUsers    UserSubscription[] @relation("ScheduledSubscriptionPlan")
+  payments             Payment[]
 }
 
 model User {
@@ -166,6 +167,9 @@ model UserSubscription {
   user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   subscriptionPlanId   String
   subscriptionPlan     SubscriptionPlan   @relation(fields: [subscriptionPlanId], references: [id])
+  scheduledPlanId      String?
+  scheduledPlan        SubscriptionPlan?  @relation("ScheduledSubscriptionPlan", fields: [scheduledPlanId], references: [id], onDelete: SetNull)
+  scheduledPlanChangeAt DateTime?
   stripeCustomerId     String?
   stripeSubscriptionId String?            @unique
   status               SubscriptionStatus @default(inactive)
@@ -175,6 +179,7 @@ model UserSubscription {
   updatedAt            DateTime           @updatedAt
 
   @@index([subscriptionPlanId])
+  @@index([scheduledPlanId])
 }
 
 model Otp {

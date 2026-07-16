@@ -16,8 +16,8 @@ function generateAccessToken() {
 }
 
 function assertValidPin(pin: string) {
-  if (!/^\d{4,8}$/.test(pin)) {
-    throw new HttpError('PIN must be 4 to 8 digits.', 400)
+  if (!/^\d{4}$/.test(pin)) {
+    throw new HttpError('PIN must be exactly 4 digits.', 400)
   }
 }
 

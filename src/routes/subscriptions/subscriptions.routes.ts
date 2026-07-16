@@ -4,6 +4,7 @@ import { jsonContent, jsonContentRequired } from 'stoker/openapi/helpers'
 import { zodResponseSchema } from '~/lib/zod-helper'
 import {
   changePlanBodySchema,
+  changePlanPreviewSchema,
   changePlanResponseSchema,
   checkoutBodySchema,
   checkoutSessionSchema,
@@ -95,6 +96,31 @@ export const SUBSCRIPTION_ROUTES = {
       [HttpStatusCodes.BAD_REQUEST]: jsonContent(
         zodResponseSchema(messageResponseSchema),
         'Unable to cancel'
+      ),
+      [HttpStatusCodes.UNAUTHORIZED]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Unauthorized'
+      ),
+    },
+  }),
+
+  previewChangePlan: createRoute({
+    method: 'post',
+    tags: ['Subscriptions'],
+    path: '/subscriptions/change-plan/preview',
+    summary: 'Preview subscription plan change billing impact',
+    security: [{ bearerAuth: [] }],
+    request: {
+      body: jsonContentRequired(changePlanBodySchema, 'Change plan payload'),
+    },
+    responses: {
+      [HttpStatusCodes.OK]: jsonContent(
+        zodResponseSchema(changePlanPreviewSchema),
+        'Plan change preview'
+      ),
+      [HttpStatusCodes.BAD_REQUEST]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Invalid plan'
       ),
       [HttpStatusCodes.UNAUTHORIZED]: jsonContent(
         zodResponseSchema(messageResponseSchema),

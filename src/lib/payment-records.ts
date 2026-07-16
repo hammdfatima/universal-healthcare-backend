@@ -144,16 +144,22 @@ export async function upsertPaymentFromCheckoutSession(session: Stripe.Checkout.
   const amountCents = session.amount_total ?? 0
   const status = mapCheckoutPaymentStatus(session.payment_status)
   const paidAt = status === 'paid' ? new Date() : null
-  const transactionId =
+  const paymentIntentId =
     typeof session.payment_intent === 'string'
       ? session.payment_intent
-      : (session.payment_intent?.id ?? session.id)
+      : session.payment_intent?.id
+  const stripeInvoiceId =
+    typeof session.invoice === 'string'
+      ? session.invoice
+      : session.invoice?.id ?? null
+  const transactionId = paymentIntentId ?? stripeInvoiceId ?? session.id
 
   const paymentData = {
     userId,
     subscriptionPlanId,
     invoiceNumber: buildInvoiceNumber('CHK', session.id),
     stripeCheckoutSessionId: session.id,
+    stripeInvoiceId: stripeInvoiceId ?? undefined,
     amountCents,
     currency: session.currency ?? 'usd',
     status,
@@ -165,15 +171,59 @@ export async function upsertPaymentFromCheckoutSession(session: Stripe.Checkout.
 
   const existing = await prisma.payment.findFirst({
     where: {
-      OR: [{ stripeCheckoutSessionId: session.id }, { transactionId }],
+      OR: [
+        { stripeCheckoutSessionId: session.id },
+        ...(stripeInvoiceId ? [{ stripeInvoiceId }] : []),
+        ...(paymentIntentId ? [{ transactionId: paymentIntentId }] : []),
+        { transactionId },
+      ],
     },
   })
 
   if (existing) {
     return prisma.payment.update({
       where: { id: existing.id },
-      data: paymentData,
+      data: {
+        ...paymentData,
+        // Prefer Stripe's invoice number when we already have an invoice-linked row.
+        invoiceNumber: existing.stripeInvoiceId
+          ? existing.invoiceNumber
+          : paymentData.invoiceNumber,
+        stripeInvoiceId: existing.stripeInvoiceId ?? stripeInvoiceId,
+      },
     })
+  }
+
+  // Avoid duplicate rows when checkout completes after invoice.paid landed first.
+  if (stripeInvoiceId || (paidAt && amountCents > 0)) {
+    const nearDuplicate = await prisma.payment.findFirst({
+      where: {
+        userId,
+        amountCents,
+        stripeCheckoutSessionId: null,
+        ...(stripeInvoiceId
+          ? { stripeInvoiceId }
+          : {
+              paidAt: {
+                gte: new Date(paidAt!.getTime() - 2 * 60 * 60 * 1000),
+                lte: new Date(paidAt!.getTime() + 2 * 60 * 60 * 1000),
+              },
+            }),
+      },
+      orderBy: { createdAt: 'desc' },
+    })
+
+    if (nearDuplicate) {
+      return prisma.payment.update({
+        where: { id: nearDuplicate.id },
+        data: {
+          stripeCheckoutSessionId: session.id,
+          transactionId: nearDuplicate.transactionId ?? transactionId,
+          subscriptionPlanId:
+            nearDuplicate.subscriptionPlanId ?? subscriptionPlanId,
+        },
+      })
+    }
   }
 
   return prisma.payment.create({
@@ -289,15 +339,51 @@ export async function upsertPaymentFromStripeInvoice(invoice: Stripe.Invoice) {
 
   const existing = await prisma.payment.findFirst({
     where: {
-      OR: [{ stripeInvoiceId: invoice.id }, { transactionId }],
+      OR: [
+        { stripeInvoiceId: invoice.id },
+        { transactionId },
+        ...(typeof invoice.payment_intent === 'string'
+          ? [{ transactionId: invoice.payment_intent }]
+          : []),
+      ],
     },
   })
 
   if (existing) {
     return prisma.payment.update({
       where: { id: existing.id },
-      data: paymentData,
+      data: {
+        ...paymentData,
+        stripeCheckoutSessionId: existing.stripeCheckoutSessionId,
+      },
     })
+  }
+
+  // Merge checkout-created rows that recorded the same charge without a Stripe invoice id.
+  if (paidAt && amountCents > 0) {
+    const checkoutDuplicate = await prisma.payment.findFirst({
+      where: {
+        userId,
+        amountCents,
+        stripeInvoiceId: null,
+        stripeCheckoutSessionId: { not: null },
+        paidAt: {
+          gte: new Date(paidAt.getTime() - 2 * 60 * 60 * 1000),
+          lte: new Date(paidAt.getTime() + 2 * 60 * 60 * 1000),
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    })
+
+    if (checkoutDuplicate) {
+      return prisma.payment.update({
+        where: { id: checkoutDuplicate.id },
+        data: {
+          ...paymentData,
+          stripeCheckoutSessionId: checkoutDuplicate.stripeCheckoutSessionId,
+        },
+      })
+    }
   }
 
   return prisma.payment.create({

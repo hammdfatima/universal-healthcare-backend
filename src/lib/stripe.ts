@@ -163,6 +163,7 @@ export async function createSubscriptionCheckoutSession(input: {
   userEmail: string
   planId: string
   stripePriceId: string
+  stripeCustomerId?: string | null
   successUrl?: string
   cancelUrl?: string
 }) {
@@ -171,7 +172,9 @@ export async function createSubscriptionCheckoutSession(input: {
 
   return stripe.checkout.sessions.create({
     mode: 'subscription',
-    customer_email: input.userEmail,
+    ...(input.stripeCustomerId
+      ? { customer: input.stripeCustomerId }
+      : { customer_email: input.userEmail }),
     line_items: [
       {
         price: input.stripePriceId,

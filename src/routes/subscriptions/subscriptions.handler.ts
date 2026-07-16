@@ -7,6 +7,7 @@ import {
   createCheckoutSession,
   getUserSubscription,
   handleStripeWebhook,
+  previewChangePlan,
   verifyCheckoutSession,
 } from '~/routes/subscriptions/subscriptions.service'
 import type { HandlerMapFromRoutes } from '~/types'
@@ -92,6 +93,26 @@ export const SUBSCRIPTION_ROUTE_HANDLER: HandlerMapFromRoutes<
     )
   },
 
+  previewChangePlan: async c => {
+    const authUser = c.get('user')
+
+    if (!authUser) {
+      throw new HttpError('Unauthorized', 401)
+    }
+
+    const { planId } = c.req.valid('json')
+    const result = await previewChangePlan(authUser.user_id, planId)
+
+    return c.json(
+      {
+        success: true,
+        message: 'Plan change preview created successfully.',
+        data: result,
+      },
+      HttpStatusCodes.OK
+    )
+  },
+
   changePlan: async c => {
     const authUser = c.get('user')
 
@@ -102,13 +123,15 @@ export const SUBSCRIPTION_ROUTE_HANDLER: HandlerMapFromRoutes<
     const { planId } = c.req.valid('json')
     const result = await changeSubscriptionPlan(authUser.user_id, planId)
 
+    const message =
+      result.mode === 'checkout'
+        ? 'Checkout session created successfully.'
+        : result.summary
+
     return c.json(
       {
         success: true,
-        message:
-          result.mode === 'updated'
-            ? 'Subscription plan updated successfully.'
-            : 'Checkout session created successfully.',
+        message,
         data: result,
       },
       HttpStatusCodes.OK

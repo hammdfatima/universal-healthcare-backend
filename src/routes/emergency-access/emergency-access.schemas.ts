@@ -30,8 +30,8 @@ export const generateEmergencyAccessBodySchema = z
   .object({
     pin: z
       .string()
-      .regex(/^\d{4,8}$/, 'PIN must be 4 to 8 digits')
-      .openapi({ example: '482915' }),
+      .regex(/^\d{4}$/, 'PIN must be exactly 4 digits')
+      .openapi({ example: '4829' }),
   })
   .openapi('GenerateEmergencyAccessBody')
 
@@ -39,8 +39,8 @@ export const unlockEmergencyAccessBodySchema = z
   .object({
     pin: z
       .string()
-      .regex(/^\d{4,8}$/, 'PIN must be 4 to 8 digits')
-      .openapi({ example: '482915' }),
+      .regex(/^\d{4}$/, 'PIN must be exactly 4 digits')
+      .openapi({ example: '4829' }),
   })
   .openapi('UnlockEmergencyAccessBody')
 
