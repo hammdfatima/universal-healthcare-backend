@@ -3,23 +3,12 @@ import type { FamilyMember, User } from '~/generated/prisma'
 import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { sendFamilyMemberWelcomeEmail } from '~/lib/email'
 import { HttpError } from '~/lib/error'
-import {
-  getCoveredMemberUserIdsFromLinks,
-} from '~/lib/household-access'
+import { getCoveredMemberUserIdsFromLinks } from '~/lib/household-access'
 import { countHouseholdSeats } from '~/lib/household-seats'
 import { hashPassword } from '~/lib/password'
-import {
-  decryptDateNullable,
-  decryptPhiNullable,
-  encryptDateToPhi,
-  encryptPhiRequired,
-} from '~/lib/phi-crypto'
+import { decryptPhiNullable, encryptPhiRequired } from '~/lib/phi-crypto'
 import type { PlanCapabilities } from '~/lib/plan-tier'
-import {
-  getFamilyMemberLimit,
-  supportsFamilyMembers,
-  supportsPets,
-} from '~/lib/plan-tier'
+import { getFamilyMemberLimit, supportsFamilyMembers, supportsPets } from '~/lib/plan-tier'
 import prisma from '~/lib/prisma'
 import { isSubscriptionActive } from '~/routes/subscriptions/subscriptions.service'
 
@@ -31,7 +20,6 @@ type CreateFamilyMemberInput = {
   email: string
   phone: string
   relationship: string
-  dateOfBirth: string
   password: string
   isEmergencyContact: boolean
 }
@@ -41,50 +29,7 @@ type UpdateFamilyMemberInput = {
   lastName: string
   phone: string
   relationship: string
-  dateOfBirth: string
   isEmergencyContact: boolean
-}
-
-function formatDateOfBirth(date: Date | null): string | null {
-  if (!date) {
-    return null
-  }
-
-  const month = String(date.getUTCMonth() + 1).padStart(2, '0')
-  const day = String(date.getUTCDate()).padStart(2, '0')
-  const year = date.getUTCFullYear()
-
-  return `${month}/${day}/${year}`
-}
-
-function parseDateOfBirth(value: string): Date {
-  const trimmed = value.trim()
-  const slashMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(trimmed)
-
-  if (slashMatch) {
-    const month = Number(slashMatch[1])
-    const day = Number(slashMatch[2])
-    const year = Number(slashMatch[3])
-    const parsed = new Date(Date.UTC(year, month - 1, day))
-
-    if (
-      parsed.getUTCFullYear() !== year ||
-      parsed.getUTCMonth() !== month - 1 ||
-      parsed.getUTCDate() !== day
-    ) {
-      throw new HttpError('Invalid date of birth.', 400)
-    }
-
-    return parsed
-  }
-
-  const parsed = new Date(trimmed)
-
-  if (Number.isNaN(parsed.getTime())) {
-    throw new HttpError('Invalid date of birth.', 400)
-  }
-
-  return parsed
 }
 
 function assertHumanRelationship(relationship: string, memberLimit: number) {
@@ -128,7 +73,6 @@ function toFamilyMemberResponse(
     email: record.memberUser.email,
     phone: decryptPhiNullable(record.memberUser.phone),
     relationship: record.relationship,
-    dateOfBirth: formatDateOfBirth(decryptDateNullable(record.memberUser.dateOfBirth)),
     isEmergencyContact: record.isEmergencyContact,
     isAccessible,
     createdAt: record.createdAt.toISOString(),
@@ -293,7 +237,6 @@ export async function createFamilyMember(ownerId: string, input: CreateFamilyMem
   const passwordHash = await hashPassword(input.password)
   const firstName = input.firstName.trim()
   const lastName = input.lastName.trim()
-  const dateOfBirth = parseDateOfBirth(input.dateOfBirth)
   const frontendUrl = Bun.env.FRONTEND_URL ?? 'http://localhost:3000'
 
   const record = await prisma.$transaction(async tx => {
@@ -304,7 +247,6 @@ export async function createFamilyMember(ownerId: string, input: CreateFamilyMem
         lastName: encryptPhiRequired(lastName),
         name: encryptPhiRequired(`${firstName} ${lastName}`.trim()),
         phone: encryptPhiRequired(input.phone.trim()),
-        dateOfBirth: encryptDateToPhi(dateOfBirth),
         password: passwordHash,
         emailVerified: true,
         onboardingCompleted: true,
@@ -381,7 +323,6 @@ export async function updateFamilyMember(
 
   const firstName = input.firstName.trim()
   const lastName = input.lastName.trim()
-  const dateOfBirth = parseDateOfBirth(input.dateOfBirth)
 
   const updated = await prisma.$transaction(async tx => {
     await tx.user.update({
@@ -391,7 +332,6 @@ export async function updateFamilyMember(
         lastName: encryptPhiRequired(lastName),
         name: encryptPhiRequired(`${firstName} ${lastName}`.trim()),
         phone: encryptPhiRequired(input.phone.trim()),
-        dateOfBirth: encryptDateToPhi(dateOfBirth),
       },
     })
 

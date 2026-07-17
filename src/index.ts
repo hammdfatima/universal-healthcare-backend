@@ -64,6 +64,10 @@ console.log('API reference available at http://localhost:8080/reference')
 
 export default {
   async fetch(request: Request, server: Bun.Server) {
+    // Bun's development server can retain its default 10-second per-request
+    // timeout even when idleTimeout is configured on the exported server.
+    server.timeout(request, 60)
+
     const headers = new Headers(request.headers)
 
     if (!headers.get('x-forwarded-for') && !headers.get('x-real-ip')) {
@@ -78,4 +82,7 @@ export default {
   },
   port: Number(Bun.env.PORT_NO ?? Bun.env.PORT ?? 8080),
   hostname: '0.0.0.0',
+  // Remote database queries can exceed Bun's default idle connection timeout
+  // during cold starts. Keep the client socket alive until the API responds.
+  idleTimeout: 60,
 }

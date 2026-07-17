@@ -1,4 +1,9 @@
-import { getCoveredMemberUserIds } from '~/lib/household-access'
+import {
+  getCoveredMemberUserIds,
+  getCoveredMemberUserIdsFromLinks,
+  getOwnerPlanCapabilities,
+} from '~/lib/household-access'
+import { getFamilyMemberLimit } from '~/lib/plan-tier'
 import { decryptPhiNullable } from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 
@@ -64,14 +69,11 @@ export async function getHouseholdMembers(userId: string): Promise<HouseholdMemb
   }
 
   const ownerId = user.managedByOwnerId ?? user.id
-  const covered = await getCoveredMemberUserIds(ownerId)
-
-  // Managed members who lost coverage should not see household peers.
-  if (user.managedByOwnerId && !covered.has(userId)) {
-    return []
-  }
-
-  const [owner, links] = await Promise.all([
+  // Fetch the plan and household records in one round trip group. This avoids
+  // repeating the family-member query and keeps remote DB cold starts below
+  // the HTTP connection timeout.
+  const [capabilities, owner, links] = await Promise.all([
+    getOwnerPlanCapabilities(ownerId),
     prisma.user.findUnique({
       where: { id: ownerId },
       select: {
@@ -96,6 +98,15 @@ export async function getHouseholdMembers(userId: string): Promise<HouseholdMemb
       orderBy: { createdAt: 'asc' },
     }),
   ])
+  const covered = getCoveredMemberUserIdsFromLinks(
+    getFamilyMemberLimit(capabilities),
+    links
+  )
+
+  // Managed members who lost coverage should not see household peers.
+  if (user.managedByOwnerId && !covered.has(userId)) {
+    return []
+  }
 
   const members: HouseholdMember[] = []
 
@@ -143,22 +154,12 @@ export async function getHouseholdMembers(userId: string): Promise<HouseholdMemb
  * Managed family members: only the account owner who added them.
  */
 export async function getSharingRecipients(userId: string): Promise<HouseholdMember[]> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true, managedByOwnerId: true },
-  })
-
-  if (!user) {
-    return []
-  }
-
   const household = await getHouseholdMembers(userId)
+  const accountOwner = household.find(member => member.isAccountOwner)
 
-  if (user.managedByOwnerId) {
-    return household.filter(member => member.isAccountOwner)
-  }
-
-  return household
+  // Only managed accounts receive an account-owner row. Account owners receive
+  // their covered members, all marked isAccountOwner=false.
+  return accountOwner ? [accountOwner] : household
 }
 
 /**

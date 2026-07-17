@@ -2,7 +2,10 @@ import { USER_ROLES } from '~/config/roles'
 import type { SubscriptionStatus, User } from '~/generated/prisma'
 import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { HttpError } from '~/lib/error'
-import { assertManagedMemberHasHouseholdAccess } from '~/lib/household-access'
+import {
+  FAMILY_ACCESS_REVOKED_MESSAGE,
+  getCoveredMemberUserIdsFromLinks,
+} from '~/lib/household-access'
 import { decryptPhiNullable } from '~/lib/phi-crypto'
 import { getFamilyMemberLimit, supportsFamilyMembers } from '~/lib/plan-tier'
 import prisma from '~/lib/prisma'
@@ -273,14 +276,42 @@ export async function unblockUser(userId: string, actorUserId?: string) {
   return toAdminUserResponse(await getAdminUserRecord(updated.id))
 }
 
-export async function assertUserNotBlocked(userId: string, tokenVersion?: number) {
+const AUTHORIZATION_CACHE_TTL_MS = 5_000
+const authorizationChecks = new Map<
+  string,
+  { expiresAt: number; promise: Promise<void> }
+>()
+
+async function assertUserNotBlockedUncached(
+  userId: string,
+  tokenVersion?: number
+) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
       isBlocked: true,
-      role: true,
       tokenVersion: true,
       managedByOwnerId: true,
+      managedByOwner: {
+        select: {
+          subscription: {
+            select: {
+              status: true,
+              subscriptionPlan: {
+                select: { memberLimit: true, allowsPets: true },
+              },
+            },
+          },
+          ownedFamilyMembers: {
+            select: {
+              memberUserId: true,
+              relationship: true,
+              createdAt: true,
+            },
+            orderBy: { createdAt: 'asc' },
+          },
+        },
+      },
     },
   })
 
@@ -299,6 +330,49 @@ export async function assertUserNotBlocked(userId: string, tokenVersion?: number
   }
 
   if (user.managedByOwnerId) {
-    await assertManagedMemberHasHouseholdAccess(userId)
+    const owner = user.managedByOwner
+    const subscription = owner?.subscription
+    const capabilities =
+      subscription && isSubscriptionActive(subscription.status)
+        ? {
+            memberLimit: subscription.subscriptionPlan.memberLimit,
+            allowsPets: subscription.subscriptionPlan.allowsPets,
+          }
+        : null
+    const covered = getCoveredMemberUserIdsFromLinks(
+      getFamilyMemberLimit(capabilities),
+      owner?.ownedFamilyMembers ?? []
+    )
+
+    if (!covered.has(userId)) {
+      throw new HttpError(FAMILY_ACCESS_REVOKED_MESSAGE, 403)
+    }
+  }
+}
+
+export async function assertUserNotBlocked(userId: string, tokenVersion?: number) {
+  const key = `${userId}:${tokenVersion ?? 0}`
+  const now = Date.now()
+  const cached = authorizationChecks.get(key)
+
+  if (cached && cached.expiresAt > now) {
+    return cached.promise
+  }
+
+  if (authorizationChecks.size > 1_000) {
+    authorizationChecks.clear()
+  }
+
+  const promise = assertUserNotBlockedUncached(userId, tokenVersion)
+  authorizationChecks.set(key, {
+    expiresAt: now + AUTHORIZATION_CACHE_TTL_MS,
+    promise,
+  })
+
+  try {
+    await promise
+  } catch (error) {
+    authorizationChecks.delete(key)
+    throw error
   }
 }

@@ -1,12 +1,16 @@
-import type { SubscriptionStatus, UserSubscription } from '~/generated/prisma'
+import type Stripe from 'stripe'
 import { USER_ROLES } from '~/config/roles'
+import type { SubscriptionStatus, UserSubscription } from '~/generated/prisma'
 import { ensureCurrencyPrice } from '~/lib/currency'
 import { HttpError } from '~/lib/error'
-import { syncHouseholdAccessAfterPlanChange } from '~/lib/household-access'
 import {
+  isManagedMemberCovered,
+  syncHouseholdAccessAfterPlanChange,
+} from '~/lib/household-access'
+import {
+  syncPaymentsForStripeSubscription,
   upsertPaymentFromCheckoutSession,
   upsertPaymentFromStripeInvoice,
-  syncPaymentsForStripeSubscription,
 } from '~/lib/payment-records'
 import prisma from '~/lib/prisma'
 import {
@@ -16,7 +20,6 @@ import {
   getStripeClient,
   parsePriceToCents,
 } from '~/lib/stripe'
-import type Stripe from 'stripe'
 
 const ACTIVE_STATUSES: SubscriptionStatus[] = ['active', 'trialing']
 
@@ -33,9 +36,7 @@ type PlanRecord = {
 
 type ChangeType = 'upgrade' | 'downgrade' | 'reactivate' | 'new'
 
-function mapStripeSubscriptionStatus(
-  status: Stripe.Subscription.Status
-): SubscriptionStatus {
+function mapStripeSubscriptionStatus(status: Stripe.Subscription.Status): SubscriptionStatus {
   switch (status) {
     case 'active':
       return 'active'
@@ -77,11 +78,8 @@ function toSubscriptionResponse(
     currentPeriodEnd: subscription.currentPeriodEnd?.toISOString() ?? null,
     cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
     plan: toPlanSummary(subscription.subscriptionPlan),
-    scheduledPlan: subscription.scheduledPlan
-      ? toPlanSummary(subscription.scheduledPlan)
-      : null,
-    scheduledPlanChangeAt:
-      subscription.scheduledPlanChangeAt?.toISOString() ?? null,
+    scheduledPlan: subscription.scheduledPlan ? toPlanSummary(subscription.scheduledPlan) : null,
+    scheduledPlanChangeAt: subscription.scheduledPlanChangeAt?.toISOString() ?? null,
   }
 }
 
@@ -89,17 +87,14 @@ export function isSubscriptionActive(status: SubscriptionStatus) {
   return ACTIVE_STATUSES.includes(status)
 }
 
-function getStripeSubscriptionPeriodEnd(
-  stripeSubscription: Stripe.Subscription
-): Date | null {
+function getStripeSubscriptionPeriodEnd(stripeSubscription: Stripe.Subscription): Date | null {
   const legacyPeriodEnd = (
     stripeSubscription as Stripe.Subscription & {
       current_period_end?: number | null
     }
   ).current_period_end
 
-  const periodEnd =
-    legacyPeriodEnd ?? stripeSubscription.items?.data?.[0]?.current_period_end
+  const periodEnd = legacyPeriodEnd ?? stripeSubscription.items?.data?.[0]?.current_period_end
 
   if (!periodEnd) {
     return null
@@ -108,20 +103,14 @@ function getStripeSubscriptionPeriodEnd(
   return new Date(periodEnd * 1000)
 }
 
-function getStripeSubscriptionPeriodStart(
-  stripeSubscription: Stripe.Subscription
-): number | null {
+function getStripeSubscriptionPeriodStart(stripeSubscription: Stripe.Subscription): number | null {
   const legacyPeriodStart = (
     stripeSubscription as Stripe.Subscription & {
       current_period_start?: number | null
     }
   ).current_period_start
 
-  return (
-    legacyPeriodStart ??
-    stripeSubscription.items?.data?.[0]?.current_period_start ??
-    null
-  )
+  return legacyPeriodStart ?? stripeSubscription.items?.data?.[0]?.current_period_start ?? null
 }
 
 function formatMoneyFromCents(amountCents: number, currency = 'usd') {
@@ -155,17 +144,11 @@ function classifyPlanChange(
     return 'downgrade'
   }
 
-  if (
-    current.billingCycle === 'monthly' &&
-    target.billingCycle === 'yearly'
-  ) {
+  if (current.billingCycle === 'monthly' && target.billingCycle === 'yearly') {
     return 'upgrade'
   }
 
-  if (
-    current.billingCycle === 'yearly' &&
-    target.billingCycle === 'monthly'
-  ) {
+  if (current.billingCycle === 'yearly' && target.billingCycle === 'monthly') {
     return 'downgrade'
   }
 
@@ -184,9 +167,7 @@ async function findPlanIdByStripePriceId(stripePriceId: string | null | undefine
   return plan?.id ?? null
 }
 
-async function resolvePlanIdFromStripeSubscription(
-  stripeSubscription: Stripe.Subscription
-) {
+async function resolvePlanIdFromStripeSubscription(stripeSubscription: Stripe.Subscription) {
   // Prefer the active Stripe price so scheduled phase changes sync correctly.
   const priceId = stripeSubscription.items.data[0]?.price?.id
   const fromPrice = await findPlanIdByStripePriceId(priceId)
@@ -230,17 +211,14 @@ async function syncLatestSubscriptionPayment(
   }
 }
 
-async function releaseExistingSubscriptionSchedule(
-  stripeSubscription: Stripe.Subscription
-) {
+async function releaseExistingSubscriptionSchedule(stripeSubscription: Stripe.Subscription) {
   const scheduleRef = stripeSubscription.schedule
   if (!scheduleRef) {
     return
   }
 
   const stripe = getStripeClient()
-  const scheduleId =
-    typeof scheduleRef === 'string' ? scheduleRef : scheduleRef.id
+  const scheduleId = typeof scheduleRef === 'string' ? scheduleRef : scheduleRef.id
 
   try {
     await stripe.subscriptionSchedules.release(scheduleId)
@@ -289,17 +267,33 @@ async function previewProrationAmount(input: {
           proration_behavior: 'create_prorations',
         })
 
-    const amountDue = preview.amount_due ?? 0
+    const prorationLines = preview.lines.data.filter(line => {
+      const parent = line.parent
+      const currentApiProration =
+        parent?.invoice_item_details?.proration === true ||
+        parent?.subscription_item_details?.proration === true
+      const legacyApiProration = (line as Stripe.InvoiceLineItem & { proration?: boolean })
+        .proration
+
+      return currentApiProration || legacyApiProration === true
+    })
+    const amountDue =
+      prorationLines.length > 0
+        ? prorationLines.reduce(
+            (total, line) =>
+              total +
+              line.amount +
+              (line.taxes?.reduce((taxTotal, tax) => taxTotal + tax.amount, 0) ?? 0),
+            0
+          )
+        : (preview.amount_due ?? 0)
     const currency = preview.currency ?? 'usd'
 
     return {
       amountDueCents: amountDue,
       amountDueFormatted: formatMoneyFromCents(Math.max(amountDue, 0), currency),
       creditCents: amountDue < 0 ? Math.abs(amountDue) : 0,
-      creditFormatted:
-        amountDue < 0
-          ? formatMoneyFromCents(Math.abs(amountDue), currency)
-          : null,
+      creditFormatted: amountDue < 0 ? formatMoneyFromCents(Math.abs(amountDue), currency) : null,
       currency,
     }
   } catch {
@@ -315,9 +309,7 @@ async function syncSubscriptionPeriodEndFromStripe(userId: string) {
   }
 
   const stripe = getStripeClient()
-  const stripeSubscription = await stripe.subscriptions.retrieve(
-    subscription.stripeSubscriptionId
-  )
+  const stripeSubscription = await stripe.subscriptions.retrieve(subscription.stripeSubscriptionId)
   const currentPeriodEnd = getStripeSubscriptionPeriodEnd(stripeSubscription)
 
   if (!currentPeriodEnd) {
@@ -345,6 +337,31 @@ async function getUserSubscriptionRecord(userId: string) {
 }
 
 export async function getUserSubscription(userId: string) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { managedByOwnerId: true },
+  })
+
+  // Family members inherit billing access from the household owner. Their own
+  // subscription row is a snapshot and can drift; never gate them on it alone.
+  if (user?.managedByOwnerId) {
+    const [memberSubscription, ownerSubscription, covered] = await Promise.all([
+      getUserSubscriptionRecord(userId),
+      getUserSubscriptionRecord(user.managedByOwnerId),
+      isManagedMemberCovered(userId),
+    ])
+
+    const subscription = memberSubscription ?? ownerSubscription
+    const ownerActive = ownerSubscription
+      ? isSubscriptionActive(ownerSubscription.status)
+      : false
+
+    return {
+      subscription: subscription ? toSubscriptionResponse(subscription) : null,
+      isActive: covered && ownerActive,
+    }
+  }
+
   const subscription = await syncSubscriptionPeriodEndFromStripe(userId)
 
   return {
@@ -484,11 +501,9 @@ async function upsertSubscriptionFromStripe(
     },
   })
 
-  await syncPaymentsForStripeSubscription(
-    stripeSubscription.id,
-    userId,
-    planId
-  ).catch(() => undefined)
+  await syncPaymentsForStripeSubscription(stripeSubscription.id, userId, planId).catch(
+    () => undefined
+  )
 
   await syncHouseholdAccessAfterPlanChange(userId)
 
@@ -511,23 +526,22 @@ export async function verifyCheckoutSession(userId: string, sessionId: string) {
     throw new HttpError('Checkout session is not completed yet.', 400)
   }
 
-  const planId = session.metadata?.planId
-
-  if (!planId) {
-    throw new HttpError('Missing plan information on checkout session.', 400)
-  }
-
   const stripeSubscription =
     typeof session.subscription === 'string'
       ? await stripe.subscriptions.retrieve(session.subscription)
       : session.subscription
 
-  const subscription = await upsertSubscriptionFromStripe(
-    userId,
-    planId,
-    stripeSubscription,
-    { clearSchedule: true }
-  )
+  const planId =
+    (await resolvePlanIdFromStripeSubscription(stripeSubscription)) ??
+    session.metadata?.planId
+
+  if (!planId) {
+    throw new HttpError('Missing plan information on checkout session.', 400)
+  }
+
+  const subscription = await upsertSubscriptionFromStripe(userId, planId, stripeSubscription, {
+    clearSchedule: true,
+  })
 
   await upsertPaymentFromCheckoutSession(session)
 
@@ -547,11 +561,10 @@ export async function handleStripeWebhook(payload: string, signature: string) {
         expand: ['subscription', 'payment_intent', 'invoice'],
       })
       const userId = session.metadata?.userId
-      const planId = session.metadata?.planId
 
       await upsertPaymentFromCheckoutSession(session)
 
-      if (!userId || !planId || !session.subscription) {
+      if (!userId || !session.subscription) {
         break
       }
 
@@ -559,6 +572,17 @@ export async function handleStripeWebhook(payload: string, signature: string) {
         typeof session.subscription === 'string'
           ? await stripe.subscriptions.retrieve(session.subscription)
           : session.subscription
+
+      // Prefer the live Stripe price over checkout metadata. A delayed
+      // checkout.session.completed from an earlier plan can otherwise overwrite
+      // a later upgrade (e.g. Couples checkout webhook arriving after Family).
+      const planId =
+        (await resolvePlanIdFromStripeSubscription(stripeSubscription)) ??
+        session.metadata?.planId
+
+      if (!planId) {
+        break
+      }
 
       await upsertSubscriptionFromStripe(userId, planId, stripeSubscription, {
         clearSchedule: true,
@@ -569,7 +593,21 @@ export async function handleStripeWebhook(payload: string, signature: string) {
     case 'customer.subscription.created':
     case 'customer.subscription.updated':
     case 'customer.subscription.deleted': {
-      const stripeSubscription = event.data.object as Stripe.Subscription
+      const eventSubscription = event.data.object as Stripe.Subscription
+      const stripe = getStripeClient()
+
+      // Always read live subscription state. Stripe webhooks can arrive out of
+      // order; trusting event.data.object alone can overwrite a successful upgrade
+      // with a stale "still on Couples" payload.
+      let stripeSubscription = eventSubscription
+      if (event.type !== 'customer.subscription.deleted') {
+        try {
+          stripeSubscription = await stripe.subscriptions.retrieve(eventSubscription.id)
+        } catch {
+          stripeSubscription = eventSubscription
+        }
+      }
+
       const userId =
         stripeSubscription.metadata?.userId ??
         (
@@ -645,17 +683,12 @@ export async function cancelSubscription(userId: string) {
   }
 
   const stripe = getStripeClient()
-  const currentStripeSub = await stripe.subscriptions.retrieve(
-    existing.stripeSubscriptionId
-  )
+  const currentStripeSub = await stripe.subscriptions.retrieve(existing.stripeSubscriptionId)
   await releaseExistingSubscriptionSchedule(currentStripeSub)
 
-  const stripeSubscription = await stripe.subscriptions.update(
-    existing.stripeSubscriptionId,
-    {
-      cancel_at_period_end: true,
-    }
-  )
+  const stripeSubscription = await stripe.subscriptions.update(existing.stripeSubscriptionId, {
+    cancel_at_period_end: true,
+  })
 
   const subscription = await upsertSubscriptionFromStripe(
     user.id,
@@ -745,9 +778,7 @@ export async function previewChangePlan(userId: string, planId: string) {
   }
 
   const stripe = getStripeClient()
-  const stripeSubscription = await stripe.subscriptions.retrieve(
-    existing.stripeSubscriptionId
-  )
+  const stripeSubscription = await stripe.subscriptions.retrieve(existing.stripeSubscriptionId)
   const subscriptionItemId = stripeSubscription.items.data[0]?.id
   const customerId =
     typeof stripeSubscription.customer === 'string'
@@ -815,9 +846,7 @@ export async function previewChangePlan(userId: string, planId: string) {
     currentPlan: toPlanSummary(existing.subscriptionPlan),
     targetPlan: toPlanSummary(plan),
     amountDueCents: Math.max(amountDueCents, 0),
-    amountDueFormatted:
-      proration?.amountDueFormatted ??
-      ensureCurrencyPrice(plan.price),
+    amountDueFormatted: proration?.amountDueFormatted ?? ensureCurrencyPrice(plan.price),
     creditCents,
     creditFormatted: proration?.creditFormatted ?? null,
     effectiveAt: null,
@@ -858,8 +887,7 @@ async function scheduleDowngradeAtPeriodEnd(input: {
     from_subscription: input.stripeSubscription.id,
   })
 
-  const phaseStart =
-    schedule.phases[0]?.start_date ?? periodStart
+  const phaseStart = schedule.phases[0]?.start_date ?? periodStart
 
   await stripe.subscriptionSchedules.update(schedule.id, {
     end_behavior: 'release',
@@ -899,55 +927,36 @@ async function scheduleDowngradeAtPeriodEnd(input: {
 
   const refreshed = await stripe.subscriptions.retrieve(input.stripeSubscription.id)
 
-  return upsertSubscriptionFromStripe(
-    input.userId,
-    input.currentPlanId,
-    refreshed,
-    {
-      scheduledPlanId: input.targetPlan.id,
-      scheduledPlanChangeAt: periodEnd,
-    }
-  )
+  return upsertSubscriptionFromStripe(input.userId, input.currentPlanId, refreshed, {
+    scheduledPlanId: input.targetPlan.id,
+    scheduledPlanChangeAt: periodEnd,
+  })
 }
 
 export async function changeSubscriptionPlan(userId: string, planId: string) {
-  const { user, existing, plan, changeType } = await buildChangePlanContext(
-    userId,
-    planId
-  )
+  const { user, existing, plan, changeType } = await buildChangePlanContext(userId, planId)
 
   if (existing?.stripeSubscriptionId) {
     const stripe = getStripeClient()
-    const stripeSubscription = await stripe.subscriptions.retrieve(
-      existing.stripeSubscriptionId
-    )
+    const stripeSubscription = await stripe.subscriptions.retrieve(existing.stripeSubscriptionId)
     const subscriptionItemId = stripeSubscription.items.data[0]?.id
 
     if (!subscriptionItemId || !plan.stripePriceId) {
       throw new HttpError('Unable to update your Stripe subscription.', 400)
     }
 
-    if (
-      existing.subscriptionPlanId === plan.id &&
-      existing.scheduledPlanId
-    ) {
+    if (existing.subscriptionPlanId === plan.id && existing.scheduledPlanId) {
       await releaseExistingSubscriptionSchedule(stripeSubscription)
-      const refreshed = await stripe.subscriptions.update(
-        existing.stripeSubscriptionId,
-        {
-          cancel_at_period_end: false,
-          metadata: {
-            userId: user.id,
-            planId: plan.id,
-          },
-        }
-      )
-      const subscription = await upsertSubscriptionFromStripe(
-        user.id,
-        plan.id,
-        refreshed,
-        { clearSchedule: true }
-      )
+      const refreshed = await stripe.subscriptions.update(existing.stripeSubscriptionId, {
+        cancel_at_period_end: false,
+        metadata: {
+          userId: user.id,
+          planId: plan.id,
+        },
+      })
+      const subscription = await upsertSubscriptionFromStripe(user.id, plan.id, refreshed, {
+        clearSchedule: true,
+      })
 
       return {
         mode: 'updated' as const,
@@ -993,8 +1002,7 @@ export async function changeSubscriptionPlan(userId: string, planId: string) {
           },
         ],
         cancel_at_period_end: false,
-        proration_behavior:
-          changeType === 'reactivate' ? 'none' : 'always_invoice',
+        proration_behavior: changeType === 'reactivate' ? 'none' : 'always_invoice',
         metadata: {
           userId: user.id,
           planId: plan.id,
@@ -1009,11 +1017,9 @@ export async function changeSubscriptionPlan(userId: string, planId: string) {
       { clearSchedule: true }
     )
 
-    await syncLatestSubscriptionPayment(
-      updatedStripeSubscription.id,
-      user.id,
-      plan.id
-    ).catch(() => undefined)
+    await syncLatestSubscriptionPayment(updatedStripeSubscription.id, user.id, plan.id).catch(
+      () => undefined
+    )
 
     const latestInvoice = await stripe.invoices
       .list({

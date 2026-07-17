@@ -10,7 +10,6 @@ export const familyMemberSchema = z
     email: z.string(),
     phone: z.string().nullable(),
     relationship: z.string(),
-    dateOfBirth: z.string().nullable(),
     isEmergencyContact: z.boolean(),
     isAccessible: z.boolean(),
     createdAt: z.string(),
@@ -37,7 +36,6 @@ export const createFamilyMemberBodySchema = z
     email: z.email().openapi({ example: 'sarah@example.com' }),
     phone: z.string().min(1).openapi({ example: '(555) 234-5678' }),
     relationship: z.string().min(1).openapi({ example: 'Spouse' }),
-    dateOfBirth: z.string().min(1).openapi({ example: '04/12/1990' }),
     password: strongPasswordSchema.openapi({ example: 'TempPass1!' }),
     isEmergencyContact: z.boolean().default(false),
   })
@@ -49,7 +47,6 @@ export const updateFamilyMemberBodySchema = z
     lastName: z.string().min(1),
     phone: z.string().min(1),
     relationship: z.string().min(1),
-    dateOfBirth: z.string().min(1),
     isEmergencyContact: z.boolean(),
   })
   .openapi('UpdateFamilyMemberBody')

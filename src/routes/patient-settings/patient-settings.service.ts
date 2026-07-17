@@ -3,12 +3,7 @@ import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { deleteCloudinaryFile } from '~/lib/cloudinary'
 import { HttpError } from '~/lib/error'
 import { hashPassword, verifyPassword } from '~/lib/password'
-import {
-  decryptDateNullable,
-  decryptPhi,
-  decryptPhiNullable,
-  decryptStringArray,
-} from '~/lib/phi-crypto'
+import { decryptPhi, decryptPhiNullable, decryptStringArray } from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 import { getStripeClient } from '~/lib/stripe'
 import {
@@ -21,7 +16,6 @@ type UpdateProfileInput = {
   lastName: string
   phone: string
   profileImage?: string
-  dateOfBirth: string
   bloodGroup: string
   gender: string
   address: string
@@ -216,7 +210,6 @@ export async function exportPatientData(userId: string) {
             firstName: true,
             lastName: true,
             phone: true,
-            dateOfBirth: true,
           },
         },
       },
@@ -313,7 +306,6 @@ export async function exportPatientData(userId: string) {
         firstName: decryptPhiNullable(record.memberUser.firstName),
         lastName: decryptPhiNullable(record.memberUser.lastName),
         phone: decryptPhiNullable(record.memberUser.phone),
-        dateOfBirth: decryptDateNullable(record.memberUser.dateOfBirth)?.toISOString() ?? null,
       },
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),

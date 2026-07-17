@@ -1,7 +1,11 @@
 import { assertPatientUser } from '~/lib/assert-patient'
 import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { HttpError } from '~/lib/error'
-import { getSharingRecipients, getSidebarFamilyMembers } from '~/lib/household'
+import {
+  getSharingRecipients,
+  getSidebarFamilyMembers,
+  reciprocalRelationship,
+} from '~/lib/household'
 import { decryptPhiNullable } from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 
@@ -33,6 +37,38 @@ async function getSharedOwnerIdsForViewer(viewerUserId: string, candidateOwnerId
   }
 
   return sharedIds
+}
+
+async function getSharedPetCountsForViewer(viewerUserId: string, candidateOwnerIds: string[]) {
+  if (candidateOwnerIds.length === 0) {
+    return new Map<string, number>()
+  }
+
+  const shares = await prisma.petShare.findMany({
+    where: {
+      granteeUserId: viewerUserId,
+      pet: {
+        ownerId: { in: candidateOwnerIds },
+        owner: {
+          subscription: {
+            is: {
+              status: { in: ['active', 'trialing'] },
+              subscriptionPlan: { allowsPets: true },
+            },
+          },
+        },
+      },
+    },
+    select: {
+      pet: { select: { ownerId: true } },
+    },
+  })
+
+  const counts = new Map<string, number>()
+  for (const share of shares) {
+    counts.set(share.pet.ownerId, (counts.get(share.pet.ownerId) ?? 0) + 1)
+  }
+  return counts
 }
 
 export async function getSharingSettings(userId: string) {
@@ -137,22 +173,85 @@ export async function updateSharingSettings(
 }
 
 export async function listSidebarFamily(userId: string) {
-  await assertPatientUser(userId)
-
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { managedByOwnerId: true },
+    select: {
+      managedByOwnerId: true,
+      familyMemberProfile: {
+        select: {
+          relationship: true,
+          owner: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+              medicalRecordShareWithAll: true,
+              medicalRecordSharesOwned: {
+                where: { granteeUserId: userId },
+                select: { id: true },
+                take: 1,
+              },
+              subscription: {
+                select: {
+                  status: true,
+                  subscriptionPlan: { select: { allowsPets: true } },
+                },
+              },
+              ownedPets: {
+                where: {
+                  shares: { some: { granteeUserId: userId } },
+                },
+                select: { id: true },
+              },
+            },
+          },
+        },
+      },
+    },
   })
 
   if (!user) {
     throw new HttpError('User not found.', 404)
   }
 
+  // Managed accounts only need the owner who added them. Resolve everything
+  // in the query above instead of traversing the household through several
+  // sequential remote DB calls.
+  if (user.managedByOwnerId && user.familyMemberProfile) {
+    const { owner, relationship } = user.familyMemberProfile
+    const petsEnabled =
+      Boolean(owner.subscription?.subscriptionPlan.allowsPets) &&
+      (owner.subscription?.status === 'active' ||
+        owner.subscription?.status === 'trialing')
+
+    return {
+      isManagedMember: true,
+      canManageFamily: false,
+      members: [
+        {
+          userId: owner.id,
+          firstName: decryptPhiNullable(owner.firstName) ?? '',
+          lastName: decryptPhiNullable(owner.lastName) ?? '',
+          email: owner.email,
+          relationship: reciprocalRelationship(relationship),
+          isAccountOwner: true,
+          hasSharedRecordsWithMe:
+            owner.medicalRecordShareWithAll ||
+            owner.medicalRecordSharesOwned.length > 0,
+          sharedPetCount: petsEnabled ? owner.ownedPets.length : 0,
+        },
+      ],
+    }
+  }
+
+  await assertPatientUser(userId)
   const members = await getSidebarFamilyMembers(userId)
-  const sharedIds = await getSharedOwnerIdsForViewer(
-    userId,
-    members.map(member => member.userId)
-  )
+  const candidateOwnerIds = members.map(member => member.userId)
+  const [sharedIds, sharedPetCounts] = await Promise.all([
+    getSharedOwnerIdsForViewer(userId, candidateOwnerIds),
+    getSharedPetCountsForViewer(userId, candidateOwnerIds),
+  ])
 
   return {
     isManagedMember: Boolean(user.managedByOwnerId),
@@ -160,28 +259,29 @@ export async function listSidebarFamily(userId: string) {
     members: members.map(member => ({
       ...member,
       hasSharedRecordsWithMe: sharedIds.has(member.userId),
+      sharedPetCount: sharedPetCounts.get(member.userId) ?? 0,
     })),
   }
 }
 
 export async function listAccessiblePatients(userId: string) {
-  await assertPatientUser(userId)
-
-  const self = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      email: true,
-    },
-  })
+  const [, self, sidebar] = await Promise.all([
+    assertPatientUser(userId),
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+      },
+    }),
+    listSidebarFamily(userId),
+  ])
 
   if (!self) {
     throw new HttpError('User not found.', 404)
   }
-
-  const sidebar = await listSidebarFamily(userId)
 
   return {
     patients: [

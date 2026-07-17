@@ -6,7 +6,6 @@
  */
 import { parseENV } from '../src/config/env'
 import {
-  encryptDateNullable,
   encryptPhiNullable,
   encryptPhiRequired,
   encryptStringArray,
@@ -36,11 +35,6 @@ await parseENV()
 let usersUpdated = 0
 const users = await prisma.user.findMany()
 for (const user of users) {
-  const dateOfBirth =
-    user.dateOfBirth && !isEncryptedPhi(user.dateOfBirth)
-      ? encryptDateNullable(new Date(user.dateOfBirth))
-      : user.dateOfBirth
-
   const data = {
     firstName: maybeEncrypt(user.firstName),
     lastName: maybeEncrypt(user.lastName),
@@ -49,7 +43,6 @@ for (const user of users) {
     gender: maybeEncrypt(user.gender),
     bloodGroup: maybeEncrypt(user.bloodGroup),
     address: maybeEncrypt(user.address),
-    dateOfBirth,
   }
 
   const changed = Object.entries(data).some(

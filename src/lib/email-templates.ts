@@ -6,8 +6,7 @@ const TEXT_MUTED = '#64748b'
 const BORDER = '#e2e8f0'
 
 export function getEmailLogoUrl() {
-  const frontendUrl =
-    Bun.env.FRONTEND_URL ?? 'https://universal-healthcrae-frontend.onrender.com'
+  const frontendUrl = Bun.env.FRONTEND_URL ?? 'https://universal-healthcrae-frontend.onrender.com'
 
   return `${frontendUrl.replace(/\/$/, '')}/logo-half.png`
 }
@@ -198,54 +197,6 @@ export function renderVerificationText(code: string) {
 
 export function renderPasswordResetText(code: string) {
   return `Your ${COMPANY_NAME} password reset code is ${code}. It expires in 10 minutes.`
-}
-
-export function renderSignInEmail(input: {
-  firstName: string
-  formattedTime: string
-  ipAddress?: string | null
-}) {
-  const detailsRows = [
-    renderCredentialRow('Time', input.formattedTime),
-    ...(input.ipAddress ? [renderCredentialRow('IP address', input.ipAddress)] : []),
-  ].join('')
-
-  const bodyHtml = `
-    <p style="margin:0 0 16px;">Hi ${escapeHtml(input.firstName)},</p>
-    <p style="margin:0 0 16px;">
-      Your ${escapeHtml(COMPANY_NAME)} account was signed in successfully.
-    </p>
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 16px;">
-      ${detailsRows}
-    </table>
-    <p style="margin:0;font-size:14px;color:${TEXT_MUTED};">
-      If this was not you, change your password immediately and contact
-      <a href="mailto:${DEFAULT_FROM_EMAIL.info}" style="color:${BRAND_GREEN};text-decoration:none;">${DEFAULT_FROM_EMAIL.info}</a>.
-    </p>
-  `
-
-  return renderEmailLayout({
-    title: 'New sign-in to your account',
-    preheader: `A new sign-in to your ${COMPANY_NAME} account was detected.`,
-    bodyHtml,
-  })
-}
-
-export function renderSignInText(input: {
-  firstName: string
-  formattedTime: string
-  ipAddress?: string | null
-}) {
-  return [
-    `Hi ${input.firstName},`,
-    '',
-    `Your ${COMPANY_NAME} account was signed in on ${input.formattedTime}.`,
-    input.ipAddress ? `IP address: ${input.ipAddress}` : '',
-    '',
-    'If this was not you, change your password immediately and contact support.',
-  ]
-    .filter(Boolean)
-    .join('\n')
 }
 
 export function renderUserQueryReplyEmail(input: {

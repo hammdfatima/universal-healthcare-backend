@@ -9,7 +9,7 @@ import {
   verifyMfaPendingToken,
   verifyPasswordResetToken,
 } from '~/lib/auth'
-import { sendPasswordResetEmail, sendSignInEmail, sendVerificationEmail } from '~/lib/email'
+import { sendPasswordResetEmail, sendVerificationEmail } from '~/lib/email'
 import { HttpError } from '~/lib/error'
 import { assertManagedMemberHasHouseholdAccess } from '~/lib/household-access'
 import {
@@ -126,25 +126,13 @@ async function recordSuccessfulSignIn(user: User, context?: SignInContext) {
   const signedInAt = new Date()
   const formattedTime = formatSignInTimestamp(signedInAt)
   const locationHint = context?.ipAddress ? ` from IP ${context.ipAddress}` : ''
-  const firstName =
-    decryptPhiNullable(user.firstName)?.trim() ||
-    decryptPhiNullable(user.name)?.split(' ')[0] ||
-    'there'
 
   try {
-    await Promise.all([
-      notifySignIn(user.id, {
-        formattedTime,
-        locationHint,
-        dedupeKey: `signin:${user.id}:${formatSignInMinuteKey(signedInAt)}`,
-      }),
-      sendSignInEmail({
-        to: user.email,
-        firstName,
-        formattedTime,
-        ipAddress: context?.ipAddress,
-      }),
-    ])
+    await notifySignIn(user.id, {
+      formattedTime,
+      locationHint,
+      dedupeKey: `signin:${user.id}:${formatSignInMinuteKey(signedInAt)}`,
+    })
   } catch (error) {
     console.error('[auth] Failed to record sign-in notification:', error)
   }

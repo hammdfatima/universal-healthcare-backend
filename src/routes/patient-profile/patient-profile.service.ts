@@ -2,12 +2,7 @@ import type { User } from '~/generated/prisma'
 import { assertPatientUser } from '~/lib/assert-patient'
 import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { HttpError } from '~/lib/error'
-import {
-  decryptDateNullable,
-  decryptPhiNullable,
-  encryptDateToPhi,
-  encryptPhiRequired,
-} from '~/lib/phi-crypto'
+import { decryptPhiNullable, encryptPhiRequired } from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 
 type CompleteOnboardingInput = {
@@ -15,17 +10,9 @@ type CompleteOnboardingInput = {
   lastName: string
   phone: string
   profileImage?: string
-  dateOfBirth: string
   bloodGroup: string
   gender: string
   address: string
-}
-
-function formatDateOfBirth(date: Date | null): string | null {
-  if (!date) {
-    return null
-  }
-  return date.toISOString()
 }
 
 function toPatientProfileResponse(user: User) {
@@ -36,7 +23,6 @@ function toPatientProfileResponse(user: User) {
     email: user.email,
     phone: decryptPhiNullable(user.phone),
     profileImage: user.profileImage,
-    dateOfBirth: formatDateOfBirth(decryptDateNullable(user.dateOfBirth)),
     bloodGroup: decryptPhiNullable(user.bloodGroup),
     gender: decryptPhiNullable(user.gender),
     address: decryptPhiNullable(user.address),
@@ -86,9 +72,6 @@ export async function completePatientOnboarding(userId: string, input: CompleteO
 function buildProfileUpdateData(input: CompleteOnboardingInput) {
   const firstName = input.firstName.trim()
   const lastName = input.lastName.trim()
-  const dateOfBirth = new Date(input.dateOfBirth)
-
-  assertDateOfBirthInPast(dateOfBirth)
 
   return {
     firstName: encryptPhiRequired(firstName),
@@ -97,26 +80,8 @@ function buildProfileUpdateData(input: CompleteOnboardingInput) {
     phone: encryptPhiRequired(input.phone.trim()),
     profileImage: input.profileImage?.trim() || null,
     gender: encryptPhiRequired(input.gender.trim()),
-    dateOfBirth: encryptDateToPhi(dateOfBirth),
     bloodGroup: encryptPhiRequired(input.bloodGroup.trim()),
     address: encryptPhiRequired(input.address.trim()),
-  }
-}
-
-function assertDateOfBirthInPast(dateOfBirth: Date) {
-  if (Number.isNaN(dateOfBirth.getTime())) {
-    throw new HttpError('Invalid date of birth.', 400)
-  }
-  const today = new Date()
-  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())
-  const dobUtc = Date.UTC(
-    dateOfBirth.getUTCFullYear(),
-    dateOfBirth.getUTCMonth(),
-    dateOfBirth.getUTCDate()
-  )
-
-  if (dobUtc >= todayUtc) {
-    throw new HttpError('Date of birth must be in the past.', 400)
   }
 }
 

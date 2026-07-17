@@ -7,8 +7,12 @@ import {
   messageResponseSchema,
   petIdParamSchema,
   petSchema,
+  petSharingSettingsSchema,
   petsListSchema,
+  sharedPetsListSchema,
+  sharedPetsQuerySchema,
   updatePetBodySchema,
+  updatePetSharingBodySchema,
 } from '~/routes/pets/pets.schemas'
 
 export const PETS_ROUTES = {
@@ -19,10 +23,7 @@ export const PETS_ROUTES = {
     summary: 'List pets for the current account owner',
     security: [{ bearerAuth: [] }],
     responses: {
-      [HttpStatusCodes.OK]: jsonContent(
-        zodResponseSchema(petsListSchema),
-        'Pets list'
-      ),
+      [HttpStatusCodes.OK]: jsonContent(zodResponseSchema(petsListSchema), 'Pets list'),
       [HttpStatusCodes.UNAUTHORIZED]: jsonContent(
         zodResponseSchema(messageResponseSchema),
         'Unauthorized'
@@ -44,10 +45,7 @@ export const PETS_ROUTES = {
       body: jsonContentRequired(createPetBodySchema, 'Create pet payload'),
     },
     responses: {
-      [HttpStatusCodes.CREATED]: jsonContent(
-        zodResponseSchema(petSchema),
-        'Pet created'
-      ),
+      [HttpStatusCodes.CREATED]: jsonContent(zodResponseSchema(petSchema), 'Pet created'),
       [HttpStatusCodes.BAD_REQUEST]: jsonContent(
         zodResponseSchema(messageResponseSchema),
         'Invalid request'
@@ -55,6 +53,82 @@ export const PETS_ROUTES = {
       [HttpStatusCodes.UNAUTHORIZED]: jsonContent(
         zodResponseSchema(messageResponseSchema),
         'Unauthorized'
+      ),
+      [HttpStatusCodes.FORBIDDEN]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Forbidden'
+      ),
+    },
+  }),
+
+  listSharedPets: createRoute({
+    method: 'get',
+    tags: ['Pets'],
+    path: '/pets/shared',
+    summary: 'List pet profiles shared with the current user',
+    security: [{ bearerAuth: [] }],
+    request: {
+      query: sharedPetsQuerySchema,
+    },
+    responses: {
+      [HttpStatusCodes.OK]: jsonContent(
+        zodResponseSchema(sharedPetsListSchema),
+        'Shared pets list'
+      ),
+      [HttpStatusCodes.UNAUTHORIZED]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Unauthorized'
+      ),
+      [HttpStatusCodes.FORBIDDEN]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Forbidden'
+      ),
+    },
+  }),
+
+  getPetSharingSettings: createRoute({
+    method: 'get',
+    tags: ['Pets'],
+    path: '/pets/{id}/sharing-settings',
+    summary: 'Get sharing settings for a pet profile',
+    security: [{ bearerAuth: [] }],
+    request: {
+      params: petIdParamSchema,
+    },
+    responses: {
+      [HttpStatusCodes.OK]: jsonContent(
+        zodResponseSchema(petSharingSettingsSchema),
+        'Pet sharing settings'
+      ),
+      [HttpStatusCodes.NOT_FOUND]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Not found'
+      ),
+      [HttpStatusCodes.FORBIDDEN]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Forbidden'
+      ),
+    },
+  }),
+
+  updatePetSharingSettings: createRoute({
+    method: 'put',
+    tags: ['Pets'],
+    path: '/pets/{id}/sharing-settings',
+    summary: 'Update sharing settings for a pet profile',
+    security: [{ bearerAuth: [] }],
+    request: {
+      params: petIdParamSchema,
+      body: jsonContentRequired(updatePetSharingBodySchema, 'Pet sharing settings'),
+    },
+    responses: {
+      [HttpStatusCodes.OK]: jsonContent(
+        zodResponseSchema(petSharingSettingsSchema),
+        'Updated pet sharing settings'
+      ),
+      [HttpStatusCodes.BAD_REQUEST]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Invalid request'
       ),
       [HttpStatusCodes.FORBIDDEN]: jsonContent(
         zodResponseSchema(messageResponseSchema),
@@ -100,10 +174,7 @@ export const PETS_ROUTES = {
       params: petIdParamSchema,
     },
     responses: {
-      [HttpStatusCodes.OK]: jsonContent(
-        zodResponseSchema(messageResponseSchema),
-        'Pet deleted'
-      ),
+      [HttpStatusCodes.OK]: jsonContent(zodResponseSchema(messageResponseSchema), 'Pet deleted'),
       [HttpStatusCodes.NOT_FOUND]: jsonContent(
         zodResponseSchema(messageResponseSchema),
         'Not found'

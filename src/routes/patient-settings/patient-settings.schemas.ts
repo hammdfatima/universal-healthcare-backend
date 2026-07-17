@@ -3,8 +3,8 @@ import { strongPasswordSchema } from '~/lib/password-policy'
 import {
   bloodGroupValues,
   genderValues,
+  patientProfileSchema,
 } from '~/routes/patient-profile/patient-profile.schemas'
-import { patientProfileSchema } from '~/routes/patient-profile/patient-profile.schemas'
 
 export const accountSettingsSchema = z
   .object({
@@ -28,7 +28,6 @@ export const updateProfileBodySchema = z
     profileImage: z.string().optional().openapi({
       example: 'https://res.cloudinary.com/demo/image/upload/v1/sample.jpg',
     }),
-    dateOfBirth: z.string().datetime().openapi({ example: '1985-03-15T00:00:00.000Z' }),
     bloodGroup: z.enum(bloodGroupValues).openapi({ example: 'O+' }),
     gender: z.enum(genderValues).openapi({ example: 'Male' }),
     address: z.string().openapi({ example: '123 Wellness Street, Health City' }),

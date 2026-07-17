@@ -29,6 +29,7 @@ export const sidebarFamilyMemberSchema = z
     relationship: z.string(),
     isAccountOwner: z.boolean(),
     hasSharedRecordsWithMe: z.boolean(),
+    sharedPetCount: z.number().int().nonnegative(),
   })
   .openapi('SidebarFamilyMember')
 

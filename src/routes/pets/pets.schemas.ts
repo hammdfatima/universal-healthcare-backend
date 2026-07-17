@@ -64,6 +64,42 @@ export const petsListSchema = z
   })
   .openapi('PetsList')
 
+export const petSharingMemberSchema = z
+  .object({
+    userId: z.string(),
+    firstName: z.string(),
+    lastName: z.string(),
+    email: z.string(),
+    relationship: z.string(),
+    isAccountOwner: z.boolean(),
+    isSharedWith: z.boolean(),
+  })
+  .openapi('PetSharingMember')
+
+export const petSharingSettingsSchema = z
+  .object({
+    petId: z.string(),
+    petName: z.string(),
+    members: z.array(petSharingMemberSchema),
+  })
+  .openapi('PetSharingSettings')
+
+export const updatePetSharingBodySchema = z
+  .object({
+    granteeUserIds: z.array(z.string()).default([]),
+  })
+  .openapi('UpdatePetSharingBody')
+
+export const sharedPetsListSchema = z
+  .object({
+    pets: z.array(petSchema),
+  })
+  .openapi('SharedPetsList')
+
+export const sharedPetsQuerySchema = z.object({
+  ownerUserId: z.string().min(1),
+})
+
 export const createPetBodySchema = z
   .object({
     name: z.string().min(1).openapi({ example: 'Buddy' }),

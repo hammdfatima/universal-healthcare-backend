@@ -1,7 +1,9 @@
 import { USER_ROLES } from '~/config/roles'
 import type { FamilyMember, Pet, User } from '~/generated/prisma'
+import { assertPatientUser } from '~/lib/assert-patient'
 import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { HttpError } from '~/lib/error'
+import { areUsersInSameHousehold, getSharingRecipients } from '~/lib/household'
 import { countHouseholdSeats } from '~/lib/household-seats'
 import {
   decryptDateNullable,
@@ -325,6 +327,124 @@ export async function listPets(ownerId: string) {
     pausedPetCount: 0,
     supportsPets: true,
   }
+}
+
+export async function getPetSharingSettings(ownerId: string, petId: string) {
+  const owner = await getOwnerWithSubscription(ownerId)
+  assertOwnerCanManagePets(owner)
+  const pet = await getOwnedPet(ownerId, petId)
+
+  const [recipients, shares] = await Promise.all([
+    getSharingRecipients(ownerId),
+    prisma.petShare.findMany({
+      where: { petId },
+      select: { granteeUserId: true },
+    }),
+  ])
+  const sharedIds = new Set(shares.map(share => share.granteeUserId))
+
+  return {
+    petId: pet.id,
+    petName: decryptPhi(pet.name),
+    members: recipients.map(member => ({
+      ...member,
+      isSharedWith: sharedIds.has(member.userId),
+    })),
+  }
+}
+
+export async function updatePetSharingSettings(
+  ownerId: string,
+  petId: string,
+  input: { granteeUserIds: string[] }
+) {
+  const owner = await getOwnerWithSubscription(ownerId)
+  assertOwnerCanManagePets(owner)
+  await getOwnedPet(ownerId, petId)
+
+  const recipients = await getSharingRecipients(ownerId)
+  const allowedIds = new Set(recipients.map(member => member.userId))
+  const uniqueGrantees = [...new Set(input.granteeUserIds)].filter(id => id !== ownerId)
+
+  for (const granteeUserId of uniqueGrantees) {
+    if (!allowedIds.has(granteeUserId)) {
+      throw new HttpError('You can only share pet data with members of your household.', 400)
+    }
+  }
+
+  await prisma.$transaction(async tx => {
+    await tx.petShare.deleteMany({ where: { petId } })
+
+    if (uniqueGrantees.length > 0) {
+      await tx.petShare.createMany({
+        data: uniqueGrantees.map(granteeUserId => ({
+          petId,
+          granteeUserId,
+        })),
+      })
+    }
+  })
+
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_UPDATE,
+    actorUserId: ownerId,
+    patientUserId: ownerId,
+    resourceType: 'PetShare',
+    resourceId: petId,
+    metadata: { granteeCount: uniqueGrantees.length },
+  })
+
+  return getPetSharingSettings(ownerId, petId)
+}
+
+export async function listSharedPets(viewerUserId: string, ownerId: string) {
+  if (viewerUserId === ownerId) {
+    await assertPatientUser(viewerUserId)
+    const ownPets = await listPets(ownerId)
+    return { pets: ownPets.pets }
+  }
+
+  const [, owner, viewer, pets] = await Promise.all([
+    assertPatientUser(viewerUserId),
+    getOwnerWithSubscription(ownerId),
+    prisma.user.findUnique({
+      where: { id: viewerUserId },
+      select: { managedByOwnerId: true },
+    }),
+    prisma.pet.findMany({
+      where: {
+        ownerId,
+        shares: { some: { granteeUserId: viewerUserId } },
+      },
+      include: {
+        emergencyContactFamilyMember: {
+          include: { memberUser: true },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    }),
+  ])
+  assertOwnerCanManagePets(owner)
+
+  // A covered managed member is already validated by requirePatient. Avoid the
+  // expensive generic household traversal for this common shared-pet path.
+  const directlyManagedByOwner = viewer?.managedByOwnerId === ownerId
+  if (
+    !directlyManagedByOwner &&
+    !(await areUsersInSameHousehold(viewerUserId, ownerId))
+  ) {
+    throw new HttpError('You do not have access to these pet profiles.', 403)
+  }
+
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PHI_READ,
+    actorUserId: viewerUserId,
+    patientUserId: ownerId,
+    resourceType: 'PetProfile',
+    metadata: { shared: true, petCount: pets.length },
+  })
+
+  return { pets: pets.map(toPetResponse) }
 }
 
 export async function createPet(ownerId: string, input: PetInput) {

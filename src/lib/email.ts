@@ -4,8 +4,6 @@ import {
   renderFamilyMemberWelcomeText,
   renderPasswordResetEmail,
   renderPasswordResetText,
-  renderSignInEmail,
-  renderSignInText,
   renderUserQueryReplyEmail,
   renderUserQueryReplyText,
   renderVerificationEmail,
@@ -93,21 +91,6 @@ export async function sendPasswordResetEmail(email: string, code: string) {
     subject: `${COMPANY_NAME} password reset code`,
     text: renderPasswordResetText(code),
     html: renderPasswordResetEmail(code),
-  })
-}
-
-export async function sendSignInEmail(input: {
-  to: string
-  firstName: string
-  formattedTime: string
-  ipAddress?: string | null
-}) {
-  await sendEmail({
-    to: input.to,
-    subject: `New sign-in to your ${COMPANY_NAME} account`,
-    text: renderSignInText(input),
-    html: renderSignInEmail(input),
-    respectEmailPreferences: true,
   })
 }
 

@@ -58,71 +58,71 @@ enum NotificationType {
 }
 
 model SubscriptionPlan {
-  id                   String             @id @default(cuid())
-  planName             String
-  price                String
-  billingCycle         BillingCycle       @default(monthly)
-  features             String[]
-  memberLimit          Int                @default(0)
-  allowsPets           Boolean            @default(false)
-  stripeProductId      String?            @unique
-  stripePriceId        String?            @unique
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
-  subscriptions        UserSubscription[]
-  scheduledForUsers    UserSubscription[] @relation("ScheduledSubscriptionPlan")
-  payments             Payment[]
+  id                String             @id @default(cuid())
+  planName          String
+  price             String
+  billingCycle      BillingCycle       @default(monthly)
+  features          String[]
+  memberLimit       Int                @default(0)
+  allowsPets        Boolean            @default(false)
+  stripeProductId   String?            @unique
+  stripePriceId     String?            @unique
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  subscriptions     UserSubscription[]
+  scheduledForUsers UserSubscription[] @relation("ScheduledSubscriptionPlan")
+  payments          Payment[]
 }
 
 model User {
-  id                  String    @id @default(cuid())
-  email               String    @unique
+  id                  String   @id @default(cuid())
+  email               String   @unique
   firstName           String?
   lastName            String?
   name                String?
   phone               String?
   profileImage        String?
   gender              String?
-  dateOfBirth         String?
   bloodGroup          String?
   address             String?
-  onboardingCompleted Boolean   @default(false)
-  mustChangePassword  Boolean   @default(false)
+  onboardingCompleted Boolean  @default(false)
+  mustChangePassword  Boolean  @default(false)
   managedByOwnerId    String?
-  managedByOwner      User?     @relation("ManagedFamilyAccounts", fields: [managedByOwnerId], references: [id], onDelete: SetNull)
-  isBlocked           Boolean   @default(false)
-  tokenVersion        Int       @default(0)
-  emailNotifications  Boolean   @default(true)
-  inAppNotifications  Boolean   @default(true)
+  managedByOwner      User?    @relation("ManagedFamilyAccounts", fields: [managedByOwnerId], references: [id], onDelete: SetNull)
+  isBlocked           Boolean  @default(false)
+  tokenVersion        Int      @default(0)
+  emailNotifications  Boolean  @default(true)
+  inAppNotifications  Boolean  @default(true)
   password            String
-  role                Role      @default(USER)
-  emailVerified       Boolean   @default(false)
-  mfaEnabled          Boolean   @default(false)
+  role                Role     @default(USER)
+  emailVerified       Boolean  @default(false)
+  mfaEnabled          Boolean  @default(false)
   mfaSecret           String?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
-  otps                    Otp[]
-  passwordResetTokens     PasswordResetToken[]
-  subscription            UserSubscription?
-  managedFamilyAccounts   User[]         @relation("ManagedFamilyAccounts")
-  ownedFamilyMembers      FamilyMember[] @relation("FamilyMemberOwner")
-  familyMemberProfile     FamilyMember?  @relation("FamilyMemberAccount")
-  ownedPets               Pet[]
-  careProviders           CareProvider[]
-  medications             Medication[]
-  allergies               Allergy[]
-  healthHistoryEntries      HealthHistoryEntry[]
-  vaccinations              Vaccination[]
-  labResults                LabResult[]
-  imagingResults            ImagingResult[]
-  payments                  Payment[]
-  notifications             Notification[]
-  repliedUserQueries        UserQuery[] @relation("UserQueryRepliedBy")
-  emergencyAccessToken      EmergencyAccessToken?
-  medicalRecordShareWithAll Boolean     @default(false)
-  medicalRecordSharesOwned  MedicalRecordShare[] @relation("MedicalRecordShareOwner")
-  medicalRecordSharesGranted MedicalRecordShare[] @relation("MedicalRecordShareGrantee")
+  otps                       Otp[]
+  passwordResetTokens        PasswordResetToken[]
+  subscription               UserSubscription?
+  managedFamilyAccounts      User[]                @relation("ManagedFamilyAccounts")
+  ownedFamilyMembers         FamilyMember[]        @relation("FamilyMemberOwner")
+  familyMemberProfile        FamilyMember?         @relation("FamilyMemberAccount")
+  ownedPets                  Pet[]
+  petSharesGranted           PetShare[]
+  careProviders              CareProvider[]
+  medications                Medication[]
+  allergies                  Allergy[]
+  healthHistoryEntries       HealthHistoryEntry[]
+  vaccinations               Vaccination[]
+  labResults                 LabResult[]
+  imagingResults             ImagingResult[]
+  payments                   Payment[]
+  notifications              Notification[]
+  repliedUserQueries         UserQuery[]           @relation("UserQueryRepliedBy")
+  emergencyAccessToken       EmergencyAccessToken?
+  medicalRecordShareWithAll  Boolean               @default(false)
+  medicalRecordSharesOwned   MedicalRecordShare[]  @relation("MedicalRecordShareOwner")
+  medicalRecordSharesGranted MedicalRecordShare[]  @relation("MedicalRecordShareGrantee")
 }
 
 model EmergencyAccessToken {
@@ -162,21 +162,21 @@ model AuditLog {
 }
 
 model UserSubscription {
-  id                   String             @id @default(cuid())
-  userId               String             @unique
-  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  subscriptionPlanId   String
-  subscriptionPlan     SubscriptionPlan   @relation(fields: [subscriptionPlanId], references: [id])
-  scheduledPlanId      String?
-  scheduledPlan        SubscriptionPlan?  @relation("ScheduledSubscriptionPlan", fields: [scheduledPlanId], references: [id], onDelete: SetNull)
+  id                    String             @id @default(cuid())
+  userId                String             @unique
+  user                  User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscriptionPlanId    String
+  subscriptionPlan      SubscriptionPlan   @relation(fields: [subscriptionPlanId], references: [id])
+  scheduledPlanId       String?
+  scheduledPlan         SubscriptionPlan?  @relation("ScheduledSubscriptionPlan", fields: [scheduledPlanId], references: [id], onDelete: SetNull)
   scheduledPlanChangeAt DateTime?
-  stripeCustomerId     String?
-  stripeSubscriptionId String?            @unique
-  status               SubscriptionStatus @default(inactive)
-  currentPeriodEnd     DateTime?
-  cancelAtPeriodEnd    Boolean            @default(false)
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
+  stripeCustomerId      String?
+  stripeSubscriptionId  String?            @unique
+  status                SubscriptionStatus @default(inactive)
+  currentPeriodEnd      DateTime?
+  cancelAtPeriodEnd     Boolean            @default(false)
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
 
   @@index([subscriptionPlanId])
   @@index([scheduledPlanId])
@@ -207,15 +207,15 @@ model PasswordResetToken {
 }
 
 model FamilyMember {
-  id                 String   @id @default(cuid())
-  ownerId            String
-  owner              User     @relation("FamilyMemberOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  memberUserId       String   @unique
-  memberUser         User     @relation("FamilyMemberAccount", fields: [memberUserId], references: [id], onDelete: Cascade)
-  relationship       String
-  isEmergencyContact Boolean  @default(false)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id                     String   @id @default(cuid())
+  ownerId                String
+  owner                  User     @relation("FamilyMemberOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  memberUserId           String   @unique
+  memberUser             User     @relation("FamilyMemberAccount", fields: [memberUserId], references: [id], onDelete: Cascade)
+  relationship           String
+  isEmergencyContact     Boolean  @default(false)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
   petsAsEmergencyContact Pet[]
 
   @@index([ownerId])
@@ -240,6 +240,7 @@ model Pet {
   vaccinationsJson               String        @default("[]")
   emergencyContactFamilyMemberId String?
   emergencyContactFamilyMember   FamilyMember? @relation(fields: [emergencyContactFamilyMemberId], references: [id], onDelete: SetNull)
+  shares                         PetShare[]
   createdAt                      DateTime      @default(now())
   updatedAt                      DateTime      @updatedAt
 
@@ -247,14 +248,28 @@ model Pet {
   @@index([emergencyContactFamilyMemberId])
 }
 
-model MedicalRecordShare {
-  id          String   @id @default(cuid())
-  ownerUserId String
-  ownerUser   User     @relation("MedicalRecordShareOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+model PetShare {
+  id            String   @id @default(cuid())
+  petId         String
+  pet           Pet      @relation(fields: [petId], references: [id], onDelete: Cascade)
   granteeUserId String
-  granteeUser User     @relation("MedicalRecordShareGrantee", fields: [granteeUserId], references: [id], onDelete: Cascade)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  granteeUser   User     @relation(fields: [granteeUserId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([petId, granteeUserId])
+  @@index([petId])
+  @@index([granteeUserId])
+}
+
+model MedicalRecordShare {
+  id            String   @id @default(cuid())
+  ownerUserId   String
+  ownerUser     User     @relation("MedicalRecordShareOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  granteeUserId String
+  granteeUser   User     @relation("MedicalRecordShareGrantee", fields: [granteeUserId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@unique([ownerUserId, granteeUserId])
   @@index([ownerUserId])
@@ -322,17 +337,17 @@ model HealthHistoryEntry {
 }
 
 model Vaccination {
-  id             String   @id @default(cuid())
-  userId         String
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  vaccineName    String
-  prescribedBy   String
-  administeredBy String
-  dosage         String
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vaccineName     String
+  prescribedBy    String
+  administeredBy  String
+  dosage          String
   vaccinationDate DateTime
-  time           String
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  time            String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@index([userId])
 }
