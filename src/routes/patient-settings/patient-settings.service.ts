@@ -7,6 +7,9 @@ import { decryptPhi, decryptPhiNullable, decryptStringArray } from '~/lib/phi-cr
 import prisma from '~/lib/prisma'
 import { getStripeClient } from '~/lib/stripe'
 import {
+  formatFamilyLifestyleHistoryForExport,
+} from '~/routes/family-lifestyle-history/family-lifestyle-history.service'
+import {
   getPatientProfile,
   updatePatientProfileData,
 } from '~/routes/patient-profile/patient-profile.service'
@@ -191,7 +194,9 @@ export async function exportPatientData(userId: string) {
     labResults,
     imagingResults,
     careProviders,
+    pharmacies,
     familyMembers,
+    familyLifestyleHistory,
   ] = await Promise.all([
     getPatientProfile(userId),
     prisma.medication.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } }),
@@ -201,6 +206,7 @@ export async function exportPatientData(userId: string) {
     prisma.labResult.findMany({ where: { userId }, orderBy: { testDate: 'desc' } }),
     prisma.imagingResult.findMany({ where: { userId }, orderBy: { scanDate: 'desc' } }),
     prisma.careProvider.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } }),
+    prisma.pharmacy.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } }),
     prisma.familyMember.findMany({
       where: { ownerId: userId },
       include: {
@@ -215,6 +221,7 @@ export async function exportPatientData(userId: string) {
       },
       orderBy: { createdAt: 'asc' },
     }),
+    prisma.familyLifestyleHistory.findUnique({ where: { userId } }),
   ])
   await writeAuditLog({
     action: AUDIT_ACTIONS.PHI_READ,
@@ -297,6 +304,15 @@ export async function exportPatientData(userId: string) {
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
     })),
+    pharmacies: pharmacies.map(record => ({
+      ...record,
+      name: decryptPhi(record.name),
+      phone: decryptPhi(record.phone),
+      address: decryptPhiNullable(record.address),
+      notes: decryptPhiNullable(record.notes),
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+    })),
     familyMembers: familyMembers.map(record => ({
       id: record.id,
       relationship: record.relationship,
@@ -310,6 +326,7 @@ export async function exportPatientData(userId: string) {
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
     })),
+    familyLifestyleHistory: formatFamilyLifestyleHistoryForExport(familyLifestyleHistory),
   }
 }
 

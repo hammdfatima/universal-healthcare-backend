@@ -402,6 +402,48 @@ export async function notifyCareProviderRemoved(
   })
 }
 
+export async function notifyPharmacyAdded(
+  userId: string,
+  pharmacy: { id: string; name: string }
+) {
+  await createNotification({
+    userId,
+    type: 'system',
+    title: 'Pharmacy added',
+    message: `${pharmacy.name} was added to your preferred pharmacies.`,
+    href: '/patient/health-record?tab=pharmacy',
+    dedupeKey: `pharmacy:added:${pharmacy.id}`,
+  })
+}
+
+export async function notifyPharmacyUpdated(
+  userId: string,
+  pharmacy: { id: string; name: string }
+) {
+  await createNotification({
+    userId,
+    type: 'system',
+    title: 'Pharmacy updated',
+    message: `Details for ${pharmacy.name} were updated.`,
+    href: '/patient/health-record?tab=pharmacy',
+    dedupeKey: `pharmacy:updated:${pharmacy.id}:${Date.now()}`,
+  })
+}
+
+export async function notifyPharmacyRemoved(
+  userId: string,
+  pharmacy: { id: string; name: string }
+) {
+  await createNotification({
+    userId,
+    type: 'system',
+    title: 'Pharmacy removed',
+    message: `${pharmacy.name} was removed from your preferred pharmacies.`,
+    href: '/patient/health-record?tab=pharmacy',
+    dedupeKey: `pharmacy:removed:${pharmacy.id}:${Date.now()}`,
+  })
+}
+
 export async function notifySignIn(
   userId: string,
   input: {

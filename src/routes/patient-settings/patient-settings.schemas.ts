@@ -62,6 +62,8 @@ export const patientDataExportSchema = z
     labResults: z.array(z.record(z.string(), z.unknown())),
     imagingResults: z.array(z.record(z.string(), z.unknown())),
     careProviders: z.array(z.record(z.string(), z.unknown())),
+    pharmacies: z.array(z.record(z.string(), z.unknown())),
+    familyLifestyleHistory: z.record(z.string(), z.unknown()),
     familyMembers: z.array(z.record(z.string(), z.unknown())),
   })
   .openapi('PatientDataExport')
