@@ -242,6 +242,7 @@ model Pet {
   veterinaryClinic               String?
   veterinaryPhone                String?
   veterinaryRecords              String?
+  additionalNotes                String?
   medicalConditionsJson          String                    @default("[]")
   medicationsJson                String                    @default("[]")
   allergiesJson                  String                    @default("[]")
