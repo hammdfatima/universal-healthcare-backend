@@ -6,7 +6,9 @@ import { PETS_ROUTES } from '~/routes/pets/pets.routes'
 const router = createRouter()
 
 router.use('/pets', requirePatient)
-router.use('/pets/*', requirePatient)
+router.use('/pets/shared', requirePatient)
+router.use('/pets/:id', requirePatient)
+router.use('/pets/:id/sharing-settings', requirePatient)
 
 router
   .openapi(PETS_ROUTES.listPets, PETS_ROUTE_HANDLER.listPets)
