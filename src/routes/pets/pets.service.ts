@@ -4,7 +4,6 @@ import { assertPatientUser } from '~/lib/assert-patient'
 import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { HttpError } from '~/lib/error'
 import { areUsersInSameHousehold, getSharingRecipients } from '~/lib/household'
-import { countHouseholdSeats } from '~/lib/household-seats'
 import {
   decryptDateNullable,
   decryptPhi,
@@ -13,9 +12,13 @@ import {
   encryptPhiNullable,
   encryptPhiRequired,
 } from '~/lib/phi-crypto'
-import { getFamilyMemberLimit, supportsPets } from '~/lib/plan-tier'
 import prisma from '~/lib/prisma'
 import { isSubscriptionActive } from '~/routes/subscriptions/subscriptions.service'
+
+type PetMedicalConditionItem = {
+  name: string
+  notes?: string
+}
 
 type PetMedicationItem = {
   name: string
@@ -37,16 +40,22 @@ type PetVaccinationItem = {
 }
 
 type PetInput = {
+  profileImage?: string
   name: string
   species: string
   breed?: string
   sex?: string
   color?: string
   dateOfBirth?: string
+  weight?: string
   microchipId?: string
+  ownerName?: string
+  ownerPhone?: string
+  ownerEmail?: string
   veterinaryClinic?: string
   veterinaryPhone?: string
   veterinaryRecords?: string
+  medicalConditions?: PetMedicalConditionItem[]
   medications?: PetMedicationItem[]
   allergies?: PetAllergyItem[]
   vaccinations?: PetVaccinationItem[]
@@ -130,16 +139,24 @@ function toPetResponse(record: PetWithEmergency) {
 
   return {
     id: record.id,
+    profileImage: record.profileImage,
     name: decryptPhi(record.name),
     species: decryptPhi(record.species),
     breed: decryptPhiNullable(record.breed),
     sex: decryptPhiNullable(record.sex),
     color: decryptPhiNullable(record.color),
     dateOfBirth: formatDateOfBirth(decryptDateNullable(record.dateOfBirth)),
+    weight: decryptPhiNullable(record.weight),
     microchipId: decryptPhiNullable(record.microchipId),
+    ownerName: decryptPhiNullable(record.ownerName),
+    ownerPhone: decryptPhiNullable(record.ownerPhone),
+    ownerEmail: decryptPhiNullable(record.ownerEmail),
     veterinaryClinic: decryptPhiNullable(record.veterinaryClinic),
     veterinaryPhone: decryptPhiNullable(record.veterinaryPhone),
     veterinaryRecords: decryptPhiNullable(record.veterinaryRecords),
+    medicalConditions: decryptJsonList<PetMedicalConditionItem>(
+      record.medicalConditionsJson
+    ),
     medications: decryptJsonList<PetMedicationItem>(record.medicationsJson),
     allergies: decryptJsonList<PetAllergyItem>(record.allergiesJson),
     vaccinations: decryptJsonList<PetVaccinationItem>(record.vaccinationsJson),
@@ -186,37 +203,12 @@ async function getOwnerWithSubscription(ownerId: string) {
   return owner
 }
 
-function assertOwnerHasActiveSubscription(
-  owner: Awaited<ReturnType<typeof getOwnerWithSubscription>>
-) {
+function assertOwnerCanManagePets(owner: Awaited<ReturnType<typeof getOwnerWithSubscription>>) {
   const subscription = owner.subscription
 
   if (!subscription || !isSubscriptionActive(subscription.status)) {
     throw new HttpError('An active subscription is required to manage pets.', 403)
   }
-
-  const capabilities = {
-    memberLimit: subscription.subscriptionPlan.memberLimit,
-    allowsPets: subscription.subscriptionPlan.allowsPets,
-  }
-
-  return {
-    capabilities,
-    limit: getFamilyMemberLimit(capabilities),
-  }
-}
-
-function assertOwnerCanManagePets(owner: Awaited<ReturnType<typeof getOwnerWithSubscription>>) {
-  const result = assertOwnerHasActiveSubscription(owner)
-
-  if (!supportsPets(result.capabilities)) {
-    throw new HttpError(
-      'Pet profiles are not included on your current plan. Upgrade to a plan that allows pets.',
-      403
-    )
-  }
-
-  return result
 }
 
 async function assertEmergencyContactBelongsToOwner(
@@ -267,16 +259,22 @@ function toPetWriteData(input: PetInput, emergencyContactFamilyMemberId: string 
   const dateOfBirth = parseOptionalDateOfBirth(input.dateOfBirth)
 
   return {
+    profileImage: emptyToNull(input.profileImage),
     name: encryptPhiRequired(input.name.trim()),
     species: encryptPhiRequired(input.species.trim()),
     breed: encryptPhiNullable(emptyToNull(input.breed)),
     sex: encryptPhiNullable(emptyToNull(input.sex)),
     color: encryptPhiNullable(emptyToNull(input.color)),
     dateOfBirth: dateOfBirth ? encryptDateToPhi(dateOfBirth) : null,
+    weight: encryptPhiNullable(emptyToNull(input.weight)),
     microchipId: encryptPhiNullable(emptyToNull(input.microchipId)),
+    ownerName: encryptPhiNullable(emptyToNull(input.ownerName)),
+    ownerPhone: encryptPhiNullable(emptyToNull(input.ownerPhone)),
+    ownerEmail: encryptPhiNullable(emptyToNull(input.ownerEmail)),
     veterinaryClinic: encryptPhiNullable(emptyToNull(input.veterinaryClinic)),
     veterinaryPhone: encryptPhiNullable(emptyToNull(input.veterinaryPhone)),
     veterinaryRecords: encryptPhiNullable(emptyToNull(input.veterinaryRecords)),
+    medicalConditionsJson: encryptJsonList(input.medicalConditions),
     medicationsJson: encryptJsonList(input.medications),
     allergiesJson: encryptJsonList(input.allergies),
     vaccinationsJson: encryptJsonList(input.vaccinations),
@@ -286,19 +284,7 @@ function toPetWriteData(input: PetInput, emergencyContactFamilyMemberId: string 
 
 export async function listPets(ownerId: string) {
   const owner = await getOwnerWithSubscription(ownerId)
-  const { capabilities, limit } = assertOwnerHasActiveSubscription(owner)
-  const seats = await countHouseholdSeats(ownerId)
-
-  if (!supportsPets(capabilities)) {
-    return {
-      pets: [],
-      limit,
-      usedSeats: seats.usedSeats,
-      memberCount: seats.accessibleMemberCount,
-      pausedPetCount: seats.pausedPetCount,
-      supportsPets: false,
-    }
-  }
+  assertOwnerCanManagePets(owner)
 
   const pets = await prisma.pet.findMany({
     where: { ownerId },
@@ -321,9 +307,9 @@ export async function listPets(ownerId: string) {
 
   return {
     pets: pets.map(toPetResponse),
-    limit,
-    usedSeats: seats.usedSeats,
-    memberCount: seats.memberCount,
+    limit: 0,
+    usedSeats: 0,
+    memberCount: 0,
     pausedPetCount: 0,
     supportsPets: true,
   }
@@ -449,15 +435,7 @@ export async function listSharedPets(viewerUserId: string, ownerId: string) {
 
 export async function createPet(ownerId: string, input: PetInput) {
   const owner = await getOwnerWithSubscription(ownerId)
-  const { limit } = assertOwnerCanManagePets(owner)
-  const seats = await countHouseholdSeats(ownerId)
-
-  if (seats.usedSeats >= limit) {
-    throw new HttpError(
-      `Your family plan allows up to ${limit} household members including pets.`,
-      400
-    )
-  }
+  assertOwnerCanManagePets(owner)
 
   const emergencyContactFamilyMemberId = await assertEmergencyContactBelongsToOwner(
     ownerId,
@@ -538,4 +516,29 @@ export async function deletePet(ownerId: string, petId: string) {
     resourceType: 'PetProfile',
     resourceId: record.id,
   })
+}
+
+export async function assertOwnerOwnsPet(ownerId: string, petId: string) {
+  const owner = await getOwnerWithSubscription(ownerId)
+  assertOwnerCanManagePets(owner)
+  return getOwnedPet(ownerId, petId)
+}
+
+export async function getPetEmergencyProfile(petId: string) {
+  const record = await prisma.pet.findFirst({
+    where: { id: petId },
+    include: {
+      emergencyContactFamilyMember: {
+        include: {
+          memberUser: true,
+        },
+      },
+    },
+  })
+
+  if (!record) {
+    throw new HttpError('Pet not found.', 404)
+  }
+
+  return toPetResponse(record)
 }

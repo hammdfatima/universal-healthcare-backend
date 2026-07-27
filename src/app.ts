@@ -19,6 +19,7 @@ import notificationsRouter from '~/routes/notifications'
 import patientDashboardRouter from '~/routes/patient-dashboard'
 import patientProfileRouter from '~/routes/patient-profile'
 import petsRouter from '~/routes/pets'
+import petEmergencyAccessRouter from '~/routes/pet-emergency-access'
 import pharmaciesRouter from '~/routes/pharmacies'
 import vaccinationsRouter from '~/routes/vaccinations'
 import patientSettingsRouter from '~/routes/patient-settings'
@@ -44,6 +45,7 @@ export function registerRoutes(app: AppOpenAPI) {
     .route(API_START_POINT, patientDashboardRouter)
     .route(API_START_POINT, familyMembersRouter)
     .route(API_START_POINT, petsRouter)
+    .route(API_START_POINT, petEmergencyAccessRouter)
     .route(API_START_POINT, careProvidersRouter)
     .route(API_START_POINT, pharmaciesRouter)
     .route(API_START_POINT, medicationsRouter)

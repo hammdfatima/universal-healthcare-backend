@@ -20,7 +20,7 @@ type MemberLink = {
 
 /**
  * Cover up to `memberLimit` humans: prefer Spouse first (oldest), then other
- * members oldest-first. Pets are gated separately via `allowsPets`.
+ * members oldest-first. Pets are available independently of plan seat limits.
  */
 export function getCoveredMemberUserIdsFromLinks(
   memberLimit: number,

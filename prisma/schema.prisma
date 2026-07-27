@@ -224,30 +224,54 @@ model FamilyMember {
 }
 
 model Pet {
-  id                             String        @id @default(cuid())
+  id                             String                    @id @default(cuid())
   ownerId                        String
-  owner                          User          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  owner                          User                      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  profileImage                   String?
   name                           String
   species                        String
   breed                          String?
   sex                            String?
   color                          String?
   dateOfBirth                    String?
+  weight                         String?
   microchipId                    String?
+  ownerName                      String?
+  ownerPhone                     String?
+  ownerEmail                     String?
   veterinaryClinic               String?
   veterinaryPhone                String?
   veterinaryRecords              String?
-  medicationsJson                String        @default("[]")
-  allergiesJson                  String        @default("[]")
-  vaccinationsJson               String        @default("[]")
+  medicalConditionsJson          String                    @default("[]")
+  medicationsJson                String                    @default("[]")
+  allergiesJson                  String                    @default("[]")
+  vaccinationsJson               String                    @default("[]")
   emergencyContactFamilyMemberId String?
-  emergencyContactFamilyMember   FamilyMember? @relation(fields: [emergencyContactFamilyMemberId], references: [id], onDelete: SetNull)
+  emergencyContactFamilyMember   FamilyMember?             @relation(fields: [emergencyContactFamilyMemberId], references: [id], onDelete: SetNull)
   shares                         PetShare[]
-  createdAt                      DateTime      @default(now())
-  updatedAt                      DateTime      @updatedAt
+  emergencyAccessToken           PetEmergencyAccessToken?
+  createdAt                      DateTime                  @default(now())
+  updatedAt                      DateTime                  @updatedAt
 
   @@index([ownerId])
   @@index([emergencyContactFamilyMemberId])
+}
+
+model PetEmergencyAccessToken {
+  id                String    @id @default(cuid())
+  petId             String    @unique
+  pet               Pet       @relation(fields: [petId], references: [id], onDelete: Cascade)
+  token             String    @unique
+  pinHash           String
+  expiresAt         DateTime
+  failedPinAttempts Int       @default(0)
+  lockedUntil       DateTime?
+  isActive          Boolean   @default(true)
+  lastAccessedAt    DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([token])
 }
 
 model PetShare {

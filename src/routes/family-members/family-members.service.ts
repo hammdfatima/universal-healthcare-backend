@@ -209,7 +209,7 @@ export async function createFamilyMember(ownerId: string, input: CreateFamilyMem
     throw new HttpError(
       limit === 1
         ? 'Your plan allows only one spouse profile.'
-        : `Your plan allows up to ${limit} household members including pets.`,
+        : `Your plan allows up to ${limit} family members.`,
       400
     )
   }

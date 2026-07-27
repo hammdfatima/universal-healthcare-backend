@@ -137,10 +137,18 @@ export async function uploadUserFile(file: File, user: IPayload) {
   validateUploadFile(file)
 
   const folder = getUploadFolder(user)
+  const mimeType = getDetectedMimeType(file)
   const buffer = Buffer.from(await file.arrayBuffer())
+
+  if (buffer.byteLength === 0) {
+    throw new HttpError('A valid file is required.', 400)
+  }
+
   const result = await uploadBuffer(buffer, {
     folder,
     resource_type: getUploadResourceType(file),
+    filename: file.name,
+    mimeType,
   })
 
   return toUploadedFileResponse(file, result)

@@ -2,12 +2,12 @@ import {
   getCoveredMemberUserIds,
   getOwnerPlanCapabilities,
 } from '~/lib/household-access'
-import { getFamilyMemberLimit, supportsPets } from '~/lib/plan-tier'
+import { getFamilyMemberLimit } from '~/lib/plan-tier'
 import prisma from '~/lib/prisma'
 
 /**
- * Seat usage for create limits: only accessible humans + pets (when allowed).
- * Soft-hidden members/pets do not consume seats.
+ * Seat usage for family-member create limits: accessible humans only.
+ * Pets are managed separately and do not consume family plan seats.
  */
 export async function countHouseholdSeats(ownerId: string) {
   const [capabilities, covered, totalMembers, petCount] = await Promise.all([
@@ -18,15 +18,14 @@ export async function countHouseholdSeats(ownerId: string) {
   ])
 
   const accessibleMemberCount = covered.size
-  const accessiblePetCount = supportsPets(capabilities) ? petCount : 0
 
   return {
     memberCount: totalMembers,
     accessibleMemberCount,
     petCount,
-    accessiblePetCount,
-    pausedPetCount: supportsPets(capabilities) ? 0 : petCount,
-    usedSeats: accessibleMemberCount + accessiblePetCount,
+    accessiblePetCount: petCount,
+    pausedPetCount: 0,
+    usedSeats: accessibleMemberCount,
   }
 }
 

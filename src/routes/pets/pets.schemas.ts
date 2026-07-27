@@ -1,5 +1,10 @@
 import { z } from '@hono/zod-openapi'
 
+const petMedicalConditionItemSchema = z.object({
+  name: z.string().min(1),
+  notes: z.string().optional().default(''),
+})
+
 const petMedicationItemSchema = z.object({
   name: z.string().min(1),
   dosage: z.string().optional().default(''),
@@ -33,16 +38,22 @@ const emergencyContactSchema = z
 export const petSchema = z
   .object({
     id: z.string(),
+    profileImage: z.string().nullable(),
     name: z.string(),
     species: z.string(),
     breed: z.string().nullable(),
     sex: z.string().nullable(),
     color: z.string().nullable(),
     dateOfBirth: z.string().nullable(),
+    weight: z.string().nullable(),
     microchipId: z.string().nullable(),
+    ownerName: z.string().nullable(),
+    ownerPhone: z.string().nullable(),
+    ownerEmail: z.string().nullable(),
     veterinaryClinic: z.string().nullable(),
     veterinaryPhone: z.string().nullable(),
     veterinaryRecords: z.string().nullable(),
+    medicalConditions: z.array(petMedicalConditionItemSchema),
     medications: z.array(petMedicationItemSchema),
     allergies: z.array(petAllergyItemSchema),
     vaccinations: z.array(petVaccinationItemSchema),
@@ -102,16 +113,22 @@ export const sharedPetsQuerySchema = z.object({
 
 export const createPetBodySchema = z
   .object({
+    profileImage: z.string().optional().default(''),
     name: z.string().min(1).openapi({ example: 'Buddy' }),
     species: z.string().min(1).openapi({ example: 'Dog' }),
     breed: z.string().optional().default(''),
     sex: z.string().optional().default(''),
     color: z.string().optional().default(''),
     dateOfBirth: z.string().optional().default(''),
+    weight: z.string().optional().default(''),
     microchipId: z.string().optional().default(''),
+    ownerName: z.string().optional().default(''),
+    ownerPhone: z.string().optional().default(''),
+    ownerEmail: z.string().optional().default(''),
     veterinaryClinic: z.string().optional().default(''),
     veterinaryPhone: z.string().optional().default(''),
     veterinaryRecords: z.string().optional().default(''),
+    medicalConditions: z.array(petMedicalConditionItemSchema).optional().default([]),
     medications: z.array(petMedicationItemSchema).optional().default([]),
     allergies: z.array(petAllergyItemSchema).optional().default([]),
     vaccinations: z.array(petVaccinationItemSchema).optional().default([]),

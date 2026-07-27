@@ -51,8 +51,9 @@ export function supportsFamilyMembers(capabilities: PlanCapabilities | null | un
   return Boolean(capabilities && capabilities.memberLimit > 0)
 }
 
-export function supportsPets(capabilities: PlanCapabilities | null | undefined): boolean {
-  return Boolean(capabilities?.allowsPets)
+/** Pets are available on every plan and do not consume family seats. */
+export function supportsPets(_capabilities?: PlanCapabilities | null): boolean {
+  return true
 }
 
 export function getFamilyMemberLimit(capabilities: PlanCapabilities | null | undefined): number {

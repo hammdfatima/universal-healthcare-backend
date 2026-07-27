@@ -53,7 +53,6 @@ async function getSharedPetCountsForViewer(viewerUserId: string, candidateOwnerI
           subscription: {
             is: {
               status: { in: ['active', 'trialing'] },
-              subscriptionPlan: { allowsPets: true },
             },
           },
         },
@@ -195,7 +194,6 @@ export async function listSidebarFamily(userId: string) {
               subscription: {
                 select: {
                   status: true,
-                  subscriptionPlan: { select: { allowsPets: true } },
                 },
               },
               ownedPets: {
@@ -221,9 +219,8 @@ export async function listSidebarFamily(userId: string) {
   if (user.managedByOwnerId && user.familyMemberProfile) {
     const { owner, relationship } = user.familyMemberProfile
     const petsEnabled =
-      Boolean(owner.subscription?.subscriptionPlan.allowsPets) &&
-      (owner.subscription?.status === 'active' ||
-        owner.subscription?.status === 'trialing')
+      owner.subscription?.status === 'active' ||
+      owner.subscription?.status === 'trialing'
 
     return {
       isManagedMember: true,
