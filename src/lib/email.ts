@@ -4,12 +4,17 @@ import {
   renderFamilyMemberWelcomeText,
   renderPasswordResetEmail,
   renderPasswordResetText,
+  renderSignInAlertEmail,
+  renderSignInAlertText,
   renderUserQueryReplyEmail,
   renderUserQueryReplyText,
   renderVerificationEmail,
   renderVerificationText,
 } from '~/lib/email-templates'
 import prisma from '~/lib/prisma'
+
+// HIPAA §2.5: never echo OTPs/passwords/reset links to server logs beyond the subject line.
+const SENSITIVE_SUBJECT_PATTERN = /otp|password|verification|sign-in|reset/i
 
 type SendEmailInput = {
   to: string
@@ -73,6 +78,11 @@ export async function sendEmail({
     return
   }
 
+  if (SENSITIVE_SUBJECT_PATTERN.test(subject)) {
+    console.log(`[email] To: ${to} Subject: ${subject} (body redacted)`)
+    return
+  }
+
   console.log(`[email] To: ${to}\nSubject: ${subject}\n${text}`)
 }
 
@@ -97,15 +107,27 @@ export async function sendPasswordResetEmail(email: string, code: string) {
 export async function sendFamilyMemberWelcomeEmail(input: {
   to: string
   firstName: string
-  loginUrl: string
+  setPasswordUrl: string
   email: string
-  password: string
 }) {
   await sendEmail({
     to: input.to,
-    subject: `Your ${COMPANY_NAME} account is ready`,
+    subject: `Set your password for your ${COMPANY_NAME} account`,
     text: renderFamilyMemberWelcomeText(input),
     html: renderFamilyMemberWelcomeEmail(input),
+    respectEmailPreferences: true,
+  })
+}
+
+export async function sendSignInAlertEmail(
+  to: string,
+  input: { time: string; ip: string; revokeUrl: string }
+) {
+  await sendEmail({
+    to,
+    subject: `New sign-in to your ${COMPANY_NAME} account`,
+    text: renderSignInAlertText(input),
+    html: renderSignInAlertEmail(input),
     respectEmailPreferences: true,
   })
 }

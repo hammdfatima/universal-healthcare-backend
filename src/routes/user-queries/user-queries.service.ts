@@ -2,6 +2,12 @@ import type { UserQuery } from '~/generated/prisma'
 import { USER_ROLES } from '~/config/roles'
 import { sendUserQueryReplyEmail } from '~/lib/email'
 import { HttpError } from '~/lib/error'
+import {
+  decryptPhi,
+  decryptPhiNullable,
+  encryptPhiNullable,
+  encryptPhiRequired,
+} from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 import {
   getUserQuerySubjectLabel,
@@ -18,13 +24,15 @@ type CreateUserQueryInput = {
 function toUserQueryResponse(record: UserQuery) {
   return {
     id: record.id,
-    fullName: record.fullName,
+    fullName: decryptPhi(record.fullName),
+    // Email stays plaintext so admins/support can reply without a decrypt round-trip
+    // on every list filter; message body / name / reply are encrypted.
     email: record.email,
     subject: record.subject,
     subjectLabel: getUserQuerySubjectLabel(record.subject),
-    message: record.message,
+    message: decryptPhi(record.message),
     isResolved: record.isResolved,
-    reply: record.reply,
+    reply: decryptPhiNullable(record.reply),
     repliedAt: record.repliedAt?.toISOString() ?? null,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
@@ -47,10 +55,10 @@ export async function createUserQuery(input: CreateUserQueryInput) {
 
   const record = await prisma.userQuery.create({
     data: {
-      fullName,
+      fullName: encryptPhiRequired(fullName),
       email,
       subject,
-      message,
+      message: encryptPhiRequired(message),
     },
   })
 
@@ -119,19 +127,21 @@ export async function replyToUserQuery(
   }
 
   const subjectLabel = getUserQuerySubjectLabel(record.subject)
+  const fullName = decryptPhi(record.fullName)
+  const message = decryptPhi(record.message)
 
   await sendUserQueryReplyEmail({
     to: record.email,
-    fullName: record.fullName,
+    fullName,
     subjectLabel,
-    originalMessage: record.message,
+    originalMessage: message,
     reply: trimmedReply,
   })
 
   const updated = await prisma.userQuery.update({
     where: { id: queryId },
     data: {
-      reply: trimmedReply,
+      reply: encryptPhiNullable(trimmedReply),
       isResolved: true,
       repliedAt: new Date(),
       repliedById: adminUserId,

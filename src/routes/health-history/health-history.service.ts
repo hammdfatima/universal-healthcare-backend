@@ -2,7 +2,12 @@ import type { HealthHistoryEntry } from '~/generated/prisma'
 import { assertPatientUser } from '~/lib/assert-patient'
 import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { HttpError } from '~/lib/error'
-import { decryptPhi, encryptPhiRequired } from '~/lib/phi-crypto'
+import {
+  decryptPhi,
+  decryptPhiToDate,
+  encryptDateToPhi,
+  encryptPhiRequired,
+} from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 import { resolveVaultPatientId } from '~/lib/vault-access'
 
@@ -55,7 +60,7 @@ function toHealthHistoryResponse(record: HealthHistoryEntry) {
   return {
     id: record.id,
     illnessName: decryptPhi(record.illnessName),
-    diagnosisDate: formatHealthHistoryDate(record.diagnosisDate),
+    diagnosisDate: formatHealthHistoryDate(decryptPhiToDate(record.diagnosisDate)),
     prescribedBy: decryptPhi(record.prescribedBy),
     details: decryptPhi(record.details),
     createdAt: record.createdAt.toISOString(),
@@ -86,8 +91,11 @@ export async function listHealthHistoryEntries(
 
   const entries = await prisma.healthHistoryEntry.findMany({
     where: { userId },
-    orderBy: { diagnosisDate: 'desc' },
   })
+  entries.sort(
+    (a, b) =>
+      decryptPhiToDate(b.diagnosisDate).getTime() - decryptPhiToDate(a.diagnosisDate).getTime()
+  )
   await writeAuditLog({
     action: AUDIT_ACTIONS.PHI_READ,
     actorUserId,
@@ -107,7 +115,9 @@ export async function createHealthHistoryEntry(userId: string, input: HealthHist
     data: {
       userId,
       illnessName: encryptPhiRequired(input.illnessName.trim()),
-      diagnosisDate: parseHealthHistoryDate(input.diagnosisDate, 'date of diagnosis'),
+      diagnosisDate: encryptDateToPhi(
+        parseHealthHistoryDate(input.diagnosisDate, 'date of diagnosis')
+      ),
       prescribedBy: encryptPhiRequired(input.prescribedBy.trim()),
       details: encryptPhiRequired(input.details.trim()),
     },
@@ -135,7 +145,9 @@ export async function updateHealthHistoryEntry(
     where: { id: entryId },
     data: {
       illnessName: encryptPhiRequired(input.illnessName.trim()),
-      diagnosisDate: parseHealthHistoryDate(input.diagnosisDate, 'date of diagnosis'),
+      diagnosisDate: encryptDateToPhi(
+        parseHealthHistoryDate(input.diagnosisDate, 'date of diagnosis')
+      ),
       prescribedBy: encryptPhiRequired(input.prescribedBy.trim()),
       details: encryptPhiRequired(input.details.trim()),
     },

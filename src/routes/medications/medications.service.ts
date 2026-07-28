@@ -3,7 +3,14 @@ import { assertPatientUser } from '~/lib/assert-patient'
 import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { HttpError } from '~/lib/error'
 import { notifyMedicationAdded, notifyMedicationDiscontinued } from '~/lib/notifications'
-import { decryptPhi, encryptPhiRequired } from '~/lib/phi-crypto'
+import {
+  decryptPhi,
+  decryptPhiToDate,
+  decryptStringArray,
+  encryptDateToPhi,
+  encryptPhiRequired,
+  encryptStringArray,
+} from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 import { resolveVaultPatientId } from '~/lib/vault-access'
 
@@ -94,9 +101,9 @@ function toMedicationResponse(record: Medication) {
     prescribedBy: decryptPhi(record.prescribedBy),
     dosage: decryptPhi(record.dosage),
     timesPerDay: record.timesPerDay,
-    timesOfDay: record.timesOfDay,
-    startDate: formatMedicationDate(record.startDate),
-    endDate: record.endDate ? formatMedicationDate(record.endDate) : null,
+    timesOfDay: decryptStringArray(record.timesOfDay),
+    startDate: formatMedicationDate(decryptPhiToDate(record.startDate)),
+    endDate: record.endDate ? formatMedicationDate(decryptPhiToDate(record.endDate)) : null,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
   }
@@ -158,9 +165,9 @@ export async function createMedication(userId: string, input: MedicationInput) {
       prescribedBy: encryptPhiRequired(input.prescribedBy.trim()),
       dosage: encryptPhiRequired(input.dosage.trim()),
       timesPerDay: input.timesPerDay,
-      timesOfDay,
-      startDate,
-      endDate,
+      timesOfDay: encryptStringArray(timesOfDay),
+      startDate: encryptDateToPhi(startDate),
+      endDate: endDate ? encryptDateToPhi(endDate) : null,
     },
   })
 
@@ -202,17 +209,18 @@ export async function updateMedication(
       prescribedBy: encryptPhiRequired(input.prescribedBy.trim()),
       dosage: encryptPhiRequired(input.dosage.trim()),
       timesPerDay: input.timesPerDay,
-      timesOfDay,
-      startDate,
-      endDate,
+      timesOfDay: encryptStringArray(timesOfDay),
+      startDate: encryptDateToPhi(startDate),
+      endDate: endDate ? encryptDateToPhi(endDate) : null,
     },
   })
 
   const today = new Date(
     Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())
   )
+  const existingEndDate = existing.endDate ? decryptPhiToDate(existing.endDate) : null
   const newlyDiscontinued =
-    endDate && endDate <= today && (!existing.endDate || existing.endDate > today)
+    endDate && endDate <= today && (!existingEndDate || existingEndDate > today)
 
   if (newlyDiscontinued) {
     await notifyMedicationDiscontinued(userId, toMedicationResponse(record))

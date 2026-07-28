@@ -6,18 +6,24 @@ import { ZodError } from "zod";
 import { HttpError } from "~/lib/error";
 
 const onError: ErrorHandler = (err, c) => {
-  console.error(err);
+  const env =
+    c.env?.NODE_ENV ?? process.env.NODE_ENV ?? Bun.env.NODE_ENV ?? "development";
+  const isProduction = env === "production";
+
+  // HIPAA §3.2: never leak stack traces / raw error details to logs in production.
+  if (isProduction) {
+    console.error(`[error] ${err.name}: ${err.message}`);
+  } else {
+    console.error(err);
+  }
 
   // 🧩 1. Handle validation errors from Zod (v4)
   if (err instanceof ZodError) {
     return c.json(
       {
         success: false,
-        error: {
-          name: "ZodError",
-          message: "Validation failed",
-          issues: err.issues, // ✅ Use "issues" in Zod v4
-        },
+        message: "Validation failed",
+        ...(isProduction ? {} : { issues: err.issues }),
       },
       HttpStatusCodes.BAD_REQUEST as ContentfulStatusCode,
     );
@@ -41,13 +47,11 @@ const onError: ErrorHandler = (err, c) => {
       ? (currentStatus as StatusCode)
       : (HttpStatusCodes.INTERNAL_SERVER_ERROR as StatusCode);
 
-  const env = c.env?.NODE_ENV ?? process.env.NODE_ENV ?? "development";
-
   return c.json(
     {
       success: false,
-      message: err.message || Phrases.INTERNAL_SERVER_ERROR,
-      stack: env === "production" ? undefined : err.stack,
+      message: isProduction ? Phrases.INTERNAL_SERVER_ERROR : err.message || Phrases.INTERNAL_SERVER_ERROR,
+      stack: isProduction ? undefined : err.stack,
     },
     statusCode as ContentfulStatusCode,
   );

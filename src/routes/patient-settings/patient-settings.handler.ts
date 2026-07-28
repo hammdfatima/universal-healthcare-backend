@@ -6,6 +6,8 @@ import {
   deletePatientAccount,
   exportPatientData,
   getPatientSettings,
+  listPatientSessions,
+  revokePatientSession,
   updatePatientAccountSettings,
   updatePatientSettingsProfile,
 } from '~/routes/patient-settings/patient-settings.service'
@@ -100,7 +102,8 @@ export const PATIENT_SETTINGS_ROUTE_HANDLER: HandlerMapFromRoutes<
       throw new HttpError('Unauthorized', 401)
     }
 
-    const data = await exportPatientData(authUser.user_id)
+    const { stepUpToken } = c.req.valid('query')
+    const data = await exportPatientData(authUser.user_id, stepUpToken)
 
     return c.json(
       {
@@ -119,14 +122,53 @@ export const PATIENT_SETTINGS_ROUTE_HANDLER: HandlerMapFromRoutes<
       throw new HttpError('Unauthorized', 401)
     }
 
-    const { confirmation } = c.req.valid('json')
-    await deletePatientAccount(authUser.user_id, confirmation)
+    const { confirmation, stepUpToken } = c.req.valid('json')
+    await deletePatientAccount(authUser.user_id, confirmation, stepUpToken)
 
     return c.json(
       {
         success: true,
         message: 'Account deleted successfully.',
         data: { message: 'Account deleted successfully.' },
+      },
+      HttpStatusCodes.OK
+    )
+  },
+
+  listSessions: async c => {
+    const authUser = c.get('user')
+
+    if (!authUser) {
+      throw new HttpError('Unauthorized', 401)
+    }
+
+    const data = await listPatientSessions(authUser.user_id, authUser.sid)
+
+    return c.json(
+      {
+        success: true,
+        message: 'Sessions fetched successfully.',
+        data,
+      },
+      HttpStatusCodes.OK
+    )
+  },
+
+  revokeSession: async c => {
+    const authUser = c.get('user')
+
+    if (!authUser) {
+      throw new HttpError('Unauthorized', 401)
+    }
+
+    const { sessionId } = c.req.valid('param')
+    await revokePatientSession(authUser.user_id, sessionId)
+
+    return c.json(
+      {
+        success: true,
+        message: 'Session revoked successfully.',
+        data: { message: 'Session revoked successfully.' },
       },
       HttpStatusCodes.OK
     )

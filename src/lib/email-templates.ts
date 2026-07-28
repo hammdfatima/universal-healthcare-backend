@@ -5,10 +5,47 @@ const BRAND_GREEN_LIGHT = '#e8f3ef'
 const TEXT_MUTED = '#64748b'
 const BORDER = '#e2e8f0'
 
-export function getEmailLogoUrl() {
-  const frontendUrl = Bun.env.FRONTEND_URL ?? 'https://universal-healthcrae-frontend.onrender.com'
+/** Public origin used when FRONTEND_URL is localhost (email clients cannot fetch it). */
+const PUBLIC_FRONTEND_FALLBACK =
+  'https://universal-healthcrae-frontend.onrender.com'
 
-  return `${frontendUrl.replace(/\/$/, '')}/logo-half.png`
+function isLocalOrPrivateHost(hostname: string) {
+  const host = hostname.toLowerCase()
+  return (
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '0.0.0.0' ||
+    host === '::1' ||
+    host.endsWith('.local')
+  )
+}
+
+/**
+ * Absolute HTTPS URL for the brand mark in HTML emails.
+ * Prefers EMAIL_LOGO_URL; otherwise FRONTEND_URL/logo-half.png, falling back to
+ * the deployed frontend when FRONTEND_URL points at localhost.
+ */
+export function getEmailLogoUrl() {
+  const explicit = Bun.env.EMAIL_LOGO_URL?.trim()
+  if (explicit) {
+    return explicit
+  }
+
+  const configured = (
+    Bun.env.FRONTEND_URL ?? PUBLIC_FRONTEND_FALLBACK
+  ).replace(/\/$/, '')
+
+  let base = configured
+  try {
+    const parsed = new URL(configured)
+    if (isLocalOrPrivateHost(parsed.hostname)) {
+      base = PUBLIC_FRONTEND_FALLBACK
+    }
+  } catch {
+    base = PUBLIC_FRONTEND_FALLBACK
+  }
+
+  return `${base}/logo-half.png`
 }
 
 function escapeHtml(value: string) {
@@ -100,29 +137,27 @@ function renderCodeBlock(code: string) {
 
 export function renderFamilyMemberWelcomeEmail(input: {
   firstName: string
-  loginUrl: string
+  setPasswordUrl: string
   email: string
-  password: string
 }) {
   const bodyHtml = `
     <p style="margin:0 0 16px;">Hi ${escapeHtml(input.firstName)},</p>
     <p style="margin:0 0 16px;">
       You have been added to a ${escapeHtml(COMPANY_NAME)} family account.
-      Use the credentials below to sign in and access your health dashboard.
+      For your security, we never email passwords — set your own password to activate your account.
     </p>
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:8px 0 20px;border:1px solid ${BORDER};border-radius:16px;background-color:#fafafa;">
       <tr>
         <td style="padding:16px 18px;">
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
             ${renderCredentialRow('Email', input.email)}
-            ${renderCredentialRow('Temporary password', input.password)}
           </table>
         </td>
       </tr>
     </table>
-    ${renderPrimaryButton('Sign in to your account', input.loginUrl)}
+    ${renderPrimaryButton('Set your password', input.setPasswordUrl)}
     <p style="margin:16px 0 0;font-size:14px;color:${TEXT_MUTED};">
-      For your security, you will be asked to change your password the first time you sign in.
+      This link expires in 7 days. If it expires, ask the account owner to invite you again.
     </p>
     <p style="margin:16px 0 0;font-size:14px;color:${TEXT_MUTED};">
       If you did not expect this invitation, please contact
@@ -131,10 +166,57 @@ export function renderFamilyMemberWelcomeEmail(input: {
   `
 
   return renderEmailLayout({
-    title: 'Your account is ready',
-    preheader: `Your ${COMPANY_NAME} login details are inside.`,
+    title: 'Set your account password',
+    preheader: `Set your ${COMPANY_NAME} password to activate your account.`,
     bodyHtml,
   })
+}
+
+export function renderSignInAlertEmail(input: {
+  time: string
+  ip: string
+  revokeUrl: string
+}) {
+  const bodyHtml = `
+    <p style="margin:0 0 16px;">We noticed a new sign-in to your ${escapeHtml(COMPANY_NAME)} account.</p>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:8px 0 20px;border:1px solid ${BORDER};border-radius:16px;background-color:#fafafa;">
+      <tr>
+        <td style="padding:16px 18px;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+            ${renderCredentialRow('Time', input.time)}
+            ${renderCredentialRow('IP address', input.ip)}
+          </table>
+        </td>
+      </tr>
+    </table>
+    ${renderPrimaryButton('Review account sessions', input.revokeUrl)}
+    <p style="margin:16px 0 0;font-size:14px;color:${TEXT_MUTED};">
+      If this wasn't you, review your active sessions, sign out other devices, and change your password immediately.
+    </p>
+  `
+
+  return renderEmailLayout({
+    title: 'New sign-in to your account',
+    preheader: `New sign-in detected at ${input.time}.`,
+    bodyHtml,
+  })
+}
+
+export function renderSignInAlertText(input: {
+  time: string
+  ip: string
+  revokeUrl: string
+}) {
+  return [
+    `We noticed a new sign-in to your ${COMPANY_NAME} account.`,
+    '',
+    `Time: ${input.time}`,
+    `IP address: ${input.ip}`,
+    '',
+    `Review your account sessions: ${input.revokeUrl}`,
+    '',
+    "If this wasn't you, review your active sessions, sign out other devices, and change your password immediately.",
+  ].join('\n')
 }
 
 export function renderVerificationEmail(code: string) {
@@ -171,21 +253,19 @@ export function renderPasswordResetEmail(code: string) {
 
 export function renderFamilyMemberWelcomeText(input: {
   firstName: string
-  loginUrl: string
+  setPasswordUrl: string
   email: string
-  password: string
 }) {
   return [
     `Hi ${input.firstName},`,
     '',
     `You have been added to a ${COMPANY_NAME} family account.`,
     '',
-    'Use the details below to sign in:',
-    `Login page: ${input.loginUrl}`,
+    'For your security, we never email passwords. Set your own password to activate your account:',
     `Email: ${input.email}`,
-    `Temporary password: ${input.password}`,
+    `Set password link: ${input.setPasswordUrl}`,
     '',
-    'For your security, you will be asked to change your password the first time you sign in.',
+    'This link expires in 7 days. If it expires, ask the account owner to invite you again.',
     '',
     `If you did not expect this invitation, please contact ${DEFAULT_FROM_EMAIL.info}.`,
   ].join('\n')

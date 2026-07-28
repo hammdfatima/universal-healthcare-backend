@@ -1,33 +1,36 @@
 import { assertPatientUser } from '~/lib/assert-patient'
 import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
+import { decryptPhiToDate } from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 
-function getActiveMedicationFilter() {
+export async function getDashboardStats(userId: string) {
+  await assertPatientUser(userId)
+
   const today = new Date()
   const todayUtc = new Date(
     Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())
   )
 
-  return {
-    OR: [{ endDate: null }, { endDate: { gte: todayUtc } }],
-  }
-}
+  const [medicationRecords, allergies, vaccinations, labResults, imagingResults] =
+    await Promise.all([
+      prisma.medication.findMany({
+        where: { userId },
+        select: { endDate: true },
+      }),
+      prisma.allergy.count({ where: { userId } }),
+      prisma.vaccination.count({ where: { userId } }),
+      prisma.labResult.count({ where: { userId } }),
+      prisma.imagingResult.count({ where: { userId } }),
+    ])
 
-export async function getDashboardStats(userId: string) {
-  await assertPatientUser(userId)
+  const medications = medicationRecords.filter(record => {
+    if (!record.endDate) {
+      return true
+    }
 
-  const [medications, allergies, vaccinations, labResults, imagingResults] = await Promise.all([
-    prisma.medication.count({
-      where: {
-        userId,
-        ...getActiveMedicationFilter(),
-      },
-    }),
-    prisma.allergy.count({ where: { userId } }),
-    prisma.vaccination.count({ where: { userId } }),
-    prisma.labResult.count({ where: { userId } }),
-    prisma.imagingResult.count({ where: { userId } }),
-  ])
+    return decryptPhiToDate(record.endDate) >= todayUtc
+  }).length
+
   await writeAuditLog({
     action: AUDIT_ACTIONS.PHI_READ,
     actorUserId: userId,

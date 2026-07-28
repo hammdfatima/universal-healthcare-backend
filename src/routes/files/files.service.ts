@@ -96,6 +96,59 @@ function validateUploadFile(file: File) {
   }
 }
 
+/**
+ * HIPAA §5.2: verify actual file contents via magic bytes, not just the
+ * client-supplied MIME type / extension, before trusting an upload as PHI.
+ */
+function detectMimeTypeFromMagicBytes(buffer: Buffer): string | null {
+  if (buffer.length >= 4 && buffer.subarray(0, 4).toString('ascii') === '%PDF') {
+    return 'application/pdf'
+  }
+
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return 'image/jpeg'
+  }
+
+  if (
+    buffer.length >= 4 &&
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47
+  ) {
+    return 'image/png'
+  }
+
+  if (buffer.length >= 4 && buffer.subarray(0, 4).toString('ascii') === 'GIF8') {
+    return 'image/gif'
+  }
+
+  if (
+    buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+  ) {
+    return 'image/webp'
+  }
+
+  return null
+}
+
+function assertFileContentsMatchAllowlist(buffer: Buffer, declaredMimeType: string) {
+  const detectedMimeType = detectMimeTypeFromMagicBytes(buffer)
+
+  if (!detectedMimeType || !ALLOWED_MIME_TYPES.has(detectedMimeType)) {
+    throw new HttpError(
+      'The file contents do not match an allowed file type (JPG, PNG, WEBP, GIF, PDF).',
+      400
+    )
+  }
+
+  if (detectedMimeType !== declaredMimeType) {
+    throw new HttpError('The file contents do not match the declared file type.', 400)
+  }
+}
+
 function toUploadedFileResponse(file: File, result: Awaited<ReturnType<typeof uploadBuffer>>) {
   return {
     publicId: result.public_id,
@@ -143,6 +196,8 @@ export async function uploadUserFile(file: File, user: IPayload) {
   if (buffer.byteLength === 0) {
     throw new HttpError('A valid file is required.', 400)
   }
+
+  assertFileContentsMatchAllowlist(buffer, mimeType)
 
   const result = await uploadBuffer(buffer, {
     folder,

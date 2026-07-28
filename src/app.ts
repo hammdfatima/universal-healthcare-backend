@@ -3,6 +3,8 @@ import emergencyAccessRouter from '~/routes/emergency-access'
 import adminDashboardRouter from '~/routes/admin-dashboard'
 import adminPaymentsRouter from '~/routes/admin-payments'
 import adminAuditLogsRouter from '~/routes/admin-audit-logs'
+import adminBreachIncidentsRouter from '~/routes/admin-breach-incidents'
+import adminRetentionRouter from '~/routes/admin-retention'
 import adminProfileRouter from '~/routes/admin-profile'
 import authRouter from '~/routes/auth'
 import filesRouter from '~/routes/files'
@@ -38,6 +40,8 @@ export function registerRoutes(app: AppOpenAPI) {
     .route(API_START_POINT, adminDashboardRouter)
     .route(API_START_POINT, adminPaymentsRouter)
     .route(API_START_POINT, adminAuditLogsRouter)
+    .route(API_START_POINT, adminBreachIncidentsRouter)
+    .route(API_START_POINT, adminRetentionRouter)
     .route(API_START_POINT, userQueriesRouter)
     .route(API_START_POINT, adminProfileRouter)
     .route(API_START_POINT, filesRouter)

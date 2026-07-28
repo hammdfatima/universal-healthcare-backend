@@ -8,6 +8,15 @@ export const signupBodySchema = z
     lastName: z.string().min(1).openapi({ example: 'Smith' }),
     email: z.email().openapi({ example: 'john@example.com' }),
     password: strongPasswordSchema.openapi({ example: 'Password1!' }),
+    agreeToTerms: z
+      .literal(true, 'You must agree to the Terms of Use.')
+      .openapi({ example: true }),
+    agreeToPrivacy: z
+      .literal(true, 'You must agree to the Privacy Policy.')
+      .openapi({ example: true }),
+    agreeToEmergencyAccess: z
+      .literal(true, 'You must agree to the Emergency Access policy.')
+      .openapi({ example: true }),
   })
   .strict()
   .openapi('SignupBody')
@@ -45,6 +54,15 @@ export const resetPasswordBodySchema = z
     password: strongPasswordSchema.openapi({ example: 'Password1!' }),
   })
   .openapi('ResetPasswordBody')
+
+export const setPasswordBodySchema = z
+  .object({
+    token: z.string().min(1).openapi({
+      description: 'Invite / set-password JWT from the welcome email',
+    }),
+    password: strongPasswordSchema.openapi({ example: 'Password1!' }),
+  })
+  .openapi('SetPasswordBody')
 
 export const verifyMfaLoginBodySchema = z
   .object({
@@ -88,6 +106,7 @@ export const authUserSchema = z
     mustChangePassword: z.boolean(),
     isFamilyMemberAccount: z.boolean(),
     mfaEnabled: z.boolean(),
+    mfaSetupRequired: z.boolean().optional(),
   })
   .openapi('AuthUser')
 
@@ -154,3 +173,15 @@ export const sessionResponseSchema = z
     user: authUserSchema,
   })
   .openapi('SessionResponse')
+
+export const stepUpVerifyBodySchema = z
+  .object({
+    password: z.string().min(1).openapi({ example: 'currentpassword' }),
+  })
+  .openapi('StepUpVerifyBody')
+
+export const stepUpTokenResponseSchema = z
+  .object({
+    stepUpToken: z.string(),
+  })
+  .openapi('StepUpTokenResponse')

@@ -3,7 +3,12 @@ import { assertPatientUser } from '~/lib/assert-patient'
 import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { HttpError } from '~/lib/error'
 import { notifyVaccinationAdded } from '~/lib/notifications'
-import { decryptPhi, encryptPhiRequired } from '~/lib/phi-crypto'
+import {
+  decryptPhi,
+  decryptPhiToDate,
+  encryptDateToPhi,
+  encryptPhiRequired,
+} from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 import { resolveVaultPatientId } from '~/lib/vault-access'
 
@@ -99,7 +104,7 @@ function toVaccinationResponse(record: Vaccination) {
     prescribedBy: decryptPhi(record.prescribedBy),
     administeredBy: decryptPhi(record.administeredBy),
     dosage: decryptPhi(record.dosage),
-    date: formatVaccinationDate(record.vaccinationDate),
+    date: formatVaccinationDate(decryptPhiToDate(record.vaccinationDate)),
     time: decryptPhi(record.time),
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
@@ -129,8 +134,12 @@ export async function listVaccinations(
 
   const vaccinations = await prisma.vaccination.findMany({
     where: { userId },
-    orderBy: { vaccinationDate: 'desc' },
   })
+  vaccinations.sort(
+    (a, b) =>
+      decryptPhiToDate(b.vaccinationDate).getTime() -
+      decryptPhiToDate(a.vaccinationDate).getTime()
+  )
   await writeAuditLog({
     action: AUDIT_ACTIONS.PHI_READ,
     actorUserId,
@@ -153,7 +162,7 @@ export async function createVaccination(userId: string, input: VaccinationInput)
       prescribedBy: encryptPhiRequired(input.prescribedBy.trim()),
       administeredBy: encryptPhiRequired(input.administeredBy.trim()),
       dosage: encryptPhiRequired(input.dosage.trim()),
-      vaccinationDate: parseVaccinationDate(input.date, 'date'),
+      vaccinationDate: encryptDateToPhi(parseVaccinationDate(input.date, 'date')),
       time: encryptPhiRequired(formatVaccinationTime(input.time)),
     },
   })
@@ -187,7 +196,7 @@ export async function updateVaccination(
       prescribedBy: encryptPhiRequired(input.prescribedBy.trim()),
       administeredBy: encryptPhiRequired(input.administeredBy.trim()),
       dosage: encryptPhiRequired(input.dosage.trim()),
-      vaccinationDate: parseVaccinationDate(input.date, 'date'),
+      vaccinationDate: encryptDateToPhi(parseVaccinationDate(input.date, 'date')),
       time: encryptPhiRequired(formatVaccinationTime(input.time)),
     },
   })

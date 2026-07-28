@@ -1,6 +1,9 @@
+import { randomBytes } from 'node:crypto'
+
 import { USER_ROLES } from '~/config/roles'
 import type { FamilyMember, User } from '~/generated/prisma'
 import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
+import { signSetPasswordInviteToken, SET_PASSWORD_INVITE_EXPIRY_DAYS } from '~/lib/auth'
 import { sendFamilyMemberWelcomeEmail } from '~/lib/email'
 import { HttpError } from '~/lib/error'
 import { getCoveredMemberUserIdsFromLinks } from '~/lib/household-access'
@@ -20,8 +23,16 @@ type CreateFamilyMemberInput = {
   email: string
   phone: string
   relationship: string
-  password: string
   isEmergencyContact: boolean
+}
+
+/**
+ * HIPAA §1.1/§2.5: never let a plaintext password cross the network or land in an
+ * email. Owners never see or choose this value — the new member sets their own
+ * password via the emailed set-password link.
+ */
+function generateRandomStrongPassword() {
+  return `Uhc-${randomBytes(24).toString('base64url')}!1a`
 }
 
 type UpdateFamilyMemberInput = {
@@ -234,10 +245,10 @@ export async function createFamilyMember(ownerId: string, input: CreateFamilyMem
     throw new HttpError('An account with this email already exists.', 409)
   }
 
-  const passwordHash = await hashPassword(input.password)
+  const passwordHash = await hashPassword(generateRandomStrongPassword())
   const firstName = input.firstName.trim()
   const lastName = input.lastName.trim()
-  const frontendUrl = Bun.env.FRONTEND_URL ?? 'http://localhost:3000'
+  const frontendUrl = (Bun.env.FRONTEND_URL ?? 'http://localhost:3000').replace(/\/$/, '')
 
   const record = await prisma.$transaction(async tx => {
     const memberUser = await tx.user.create({
@@ -279,12 +290,29 @@ export async function createFamilyMember(ownerId: string, input: CreateFamilyMem
     })
   })
 
+  const resetRecord = await prisma.passwordResetToken.create({
+    data: {
+      userId: record.memberUserId,
+      expiresAt: new Date(
+        Date.now() + SET_PASSWORD_INVITE_EXPIRY_DAYS * 24 * 60 * 60 * 1000
+      ),
+    },
+  })
+  const setPasswordToken = signSetPasswordInviteToken(
+    {
+      user_id: record.memberUserId,
+      email,
+      role: record.memberUser.role,
+      tokenVersion: record.memberUser.tokenVersion,
+    },
+    resetRecord.id
+  )
+
   await sendFamilyMemberWelcomeEmail({
     to: email,
     firstName,
-    loginUrl: `${frontendUrl}/login`,
+    setPasswordUrl: `${frontendUrl}/set-password?token=${encodeURIComponent(setPasswordToken)}&email=${encodeURIComponent(email)}`,
     email,
-    password: input.password,
   })
   await writeAuditLog({
     action: AUDIT_ACTIONS.PHI_CREATE,

@@ -1,5 +1,4 @@
 import { z } from '@hono/zod-openapi'
-import { strongPasswordSchema } from '~/lib/password-policy'
 
 export const familyMemberSchema = z
   .object({
@@ -36,7 +35,6 @@ export const createFamilyMemberBodySchema = z
     email: z.email().openapi({ example: 'sarah@example.com' }),
     phone: z.string().min(1).openapi({ example: '(555) 234-5678' }),
     relationship: z.string().min(1).openapi({ example: 'Spouse' }),
-    password: strongPasswordSchema.openapi({ example: 'TempPass1!' }),
     isEmergencyContact: z.boolean().default(false),
   })
   .openapi('CreateFamilyMemberBody')

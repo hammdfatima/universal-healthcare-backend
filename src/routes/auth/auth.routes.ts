@@ -15,8 +15,11 @@ import {
   resetTokenResponseSchema,
   sessionResponseSchema,
   sessionUserResponseSchema,
+  setPasswordBodySchema,
   signupBodySchema,
   signupSessionUserResponseSchema,
+  stepUpTokenResponseSchema,
+  stepUpVerifyBodySchema,
   verifyEmailBodySchema,
   verifyMfaLoginBodySchema,
   verifyResetOtpBodySchema,
@@ -191,6 +194,32 @@ export const AUTH_ROUTES = {
     },
   }),
 
+  setPassword: createRoute({
+    method: 'post',
+    tags: ['Auth'],
+    path: '/auth/set-password',
+    summary: 'Set password from invite link and sign in',
+    description:
+      'Used by family-member welcome emails. Consumes the invite token, sets the password, and returns an authenticated session.',
+    request: {
+      body: jsonContentRequired(setPasswordBodySchema, 'Invite token and new password'),
+    },
+    responses: {
+      [HttpStatusCodes.OK]: jsonContent(
+        zodResponseSchema(sessionUserResponseSchema),
+        'Password set and session issued'
+      ),
+      [HttpStatusCodes.BAD_REQUEST]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Invalid or expired set-password token'
+      ),
+      [HttpStatusCodes.FORBIDDEN]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Account blocked or household access revoked'
+      ),
+    },
+  }),
+
   logout: createRoute({
     method: 'post',
     tags: ['Auth'],
@@ -285,6 +314,27 @@ export const AUTH_ROUTES = {
       [HttpStatusCodes.OK]: jsonContent(
         zodResponseSchema(mfaStatusSchema),
         'MFA disabled'
+      ),
+    },
+  }),
+
+  stepUpVerify: createRoute({
+    method: 'post',
+    tags: ['Auth'],
+    path: '/auth/step-up/verify',
+    summary: 'Verify current password for a sensitive action (HIPAA step-up auth)',
+    security: [{ bearerAuth: [] }],
+    request: {
+      body: jsonContentRequired(stepUpVerifyBodySchema, 'Current password'),
+    },
+    responses: {
+      [HttpStatusCodes.OK]: jsonContent(
+        zodResponseSchema(stepUpTokenResponseSchema),
+        'Step-up token issued'
+      ),
+      [HttpStatusCodes.UNAUTHORIZED]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Incorrect password'
       ),
     },
   }),

@@ -1,4 +1,6 @@
 import type { User } from '~/generated/prisma'
+import { bumpTokenVersion } from '~/lib/account-security'
+import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { HttpError } from '~/lib/error'
 import { hashPassword, verifyPassword } from '~/lib/password'
 import {
@@ -115,5 +117,15 @@ export async function changeAdminPassword(
   await prisma.user.update({
     where: { id: userId },
     data: { password: passwordHash },
+  })
+
+  // HIPAA §2.5: a password change invalidates every other active session/token.
+  await bumpTokenVersion(userId)
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PASSWORD_CHANGE,
+    actorUserId: userId,
+    actorRole: user.role,
+    resourceType: 'Auth',
+    resourceId: userId,
   })
 }

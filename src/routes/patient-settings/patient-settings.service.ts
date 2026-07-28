@@ -1,10 +1,21 @@
 import { USER_ROLES } from '~/config/roles'
+import {
+  bumpTokenVersion,
+  listAuthSessions,
+  revokeAuthSession,
+} from '~/lib/account-security'
 import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { deleteCloudinaryFile } from '~/lib/cloudinary'
 import { HttpError } from '~/lib/error'
 import { hashPassword, verifyPassword } from '~/lib/password'
-import { decryptPhi, decryptPhiNullable, decryptStringArray } from '~/lib/phi-crypto'
+import {
+  decryptPhi,
+  decryptPhiNullable,
+  decryptPhiToDate,
+  decryptStringArray,
+} from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
+import { consumeStepUpToken } from '~/lib/step-up'
 import { getStripeClient } from '~/lib/stripe'
 import {
   formatFamilyLifestyleHistoryForExport,
@@ -117,6 +128,42 @@ export async function changePatientPassword(
       mustChangePassword: false,
     },
   })
+
+  // HIPAA §2.5: a password change invalidates every other active session/token.
+  await bumpTokenVersion(userId)
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PASSWORD_CHANGE,
+    actorUserId: userId,
+    patientUserId: userId,
+    resourceType: 'Auth',
+    resourceId: userId,
+  })
+}
+
+function assertStepUpProvided(stepUpToken?: string | null): asserts stepUpToken is string {
+  if (!stepUpToken) {
+    throw new HttpError('Step-up authentication required.', 403)
+  }
+}
+
+export async function listPatientSessions(userId: string, currentSessionId?: string | null) {
+  const sessions = await listAuthSessions(userId)
+
+  return {
+    sessions: sessions.map(session => ({
+      id: session.id,
+      sessionId: session.sessionId,
+      ip: session.ip,
+      userAgent: session.userAgent,
+      lastSeenAt: session.lastSeenAt.toISOString(),
+      createdAt: session.createdAt.toISOString(),
+      isCurrent: session.sessionId === currentSessionId,
+    })),
+  }
+}
+
+export async function revokePatientSession(userId: string, sessionId: string) {
+  await revokeAuthSession(userId, sessionId)
 }
 
 type CloudinaryResourceType = 'image' | 'video' | 'raw' | 'auto'
@@ -174,7 +221,10 @@ async function permanentlyDeleteUser(userId: string) {
   await prisma.user.delete({ where: { id: userId } })
 }
 
-export async function exportPatientData(userId: string) {
+export async function exportPatientData(userId: string, stepUpToken?: string | null) {
+  assertStepUpProvided(stepUpToken)
+  consumeStepUpToken(userId, stepUpToken)
+
   const user = await prisma.user.findUnique({ where: { id: userId } })
 
   if (!user) {
@@ -202,9 +252,9 @@ export async function exportPatientData(userId: string) {
     prisma.medication.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } }),
     prisma.allergy.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } }),
     prisma.healthHistoryEntry.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } }),
-    prisma.vaccination.findMany({ where: { userId }, orderBy: { vaccinationDate: 'desc' } }),
-    prisma.labResult.findMany({ where: { userId }, orderBy: { testDate: 'desc' } }),
-    prisma.imagingResult.findMany({ where: { userId }, orderBy: { scanDate: 'desc' } }),
+    prisma.vaccination.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } }),
+    prisma.labResult.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } }),
+    prisma.imagingResult.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } }),
     prisma.careProvider.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } }),
     prisma.pharmacy.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } }),
     prisma.familyMember.findMany({
@@ -240,8 +290,9 @@ export async function exportPatientData(userId: string) {
       condition: decryptPhi(record.condition),
       prescribedBy: decryptPhi(record.prescribedBy),
       dosage: decryptPhi(record.dosage),
-      startDate: record.startDate.toISOString(),
-      endDate: record.endDate?.toISOString() ?? null,
+      timesOfDay: decryptStringArray(record.timesOfDay),
+      startDate: decryptPhiToDate(record.startDate).toISOString(),
+      endDate: record.endDate ? decryptPhiToDate(record.endDate).toISOString() : null,
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
     })),
@@ -259,7 +310,7 @@ export async function exportPatientData(userId: string) {
       illnessName: decryptPhi(record.illnessName),
       prescribedBy: decryptPhi(record.prescribedBy),
       details: decryptPhi(record.details),
-      diagnosisDate: record.diagnosisDate.toISOString(),
+      diagnosisDate: decryptPhiToDate(record.diagnosisDate).toISOString(),
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
     })),
@@ -270,7 +321,7 @@ export async function exportPatientData(userId: string) {
       administeredBy: decryptPhi(record.administeredBy),
       dosage: decryptPhi(record.dosage),
       time: decryptPhi(record.time),
-      vaccinationDate: record.vaccinationDate.toISOString(),
+      vaccinationDate: decryptPhiToDate(record.vaccinationDate).toISOString(),
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
     })),
@@ -280,7 +331,7 @@ export async function exportPatientData(userId: string) {
       testType: decryptPhi(record.testType),
       fileUrl: decryptPhi(record.fileUrl),
       filePublicId: decryptPhi(record.filePublicId),
-      testDate: record.testDate.toISOString(),
+      testDate: decryptPhiToDate(record.testDate).toISOString(),
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
     })),
@@ -291,7 +342,7 @@ export async function exportPatientData(userId: string) {
       scanType: decryptPhi(record.scanType),
       fileUrl: decryptPhi(record.fileUrl),
       filePublicId: decryptPhi(record.filePublicId),
-      scanDate: record.scanDate.toISOString(),
+      scanDate: decryptPhiToDate(record.scanDate).toISOString(),
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
     })),
@@ -330,10 +381,17 @@ export async function exportPatientData(userId: string) {
   }
 }
 
-export async function deletePatientAccount(userId: string, confirmation: string) {
+export async function deletePatientAccount(
+  userId: string,
+  confirmation: string,
+  stepUpToken?: string | null
+) {
   if (confirmation !== 'DELETE') {
     throw new HttpError('Type DELETE to confirm account deletion.', 400)
   }
+
+  assertStepUpProvided(stepUpToken)
+  consumeStepUpToken(userId, stepUpToken)
 
   const user = await prisma.user.findUnique({
     where: { id: userId },

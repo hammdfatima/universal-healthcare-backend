@@ -15,6 +15,9 @@ export const ACCESS_TOKEN_EXPIRY_SECONDS = ONE_DAY_IN_SECONDS
 /** OTP email copy + DB otp expiry + reset JWT/expiry must stay aligned */
 export const PASSWORD_RESET_AND_OTP_EXPIRY_MINUTES = 10
 
+/** Family welcome / invite set-password links stay usable longer than OTP resets. */
+export const SET_PASSWORD_INVITE_EXPIRY_DAYS = 7
+
 const RESET_JWT_MARKER = 'password_reset' as const
 
 export type PasswordResetJwtPayload = IPayload & {
@@ -50,14 +53,26 @@ export function signMfaPendingToken(payload: IPayload) {
 }
 
 /** Short-lived JWT; single-use enforced server-side via `PasswordResetToken` + jti */
-export function signPasswordResetToken(payload: IPayload, jti: string) {
+export function signPasswordResetToken(
+  payload: IPayload,
+  jti: string,
+  expiresInSeconds = PASSWORD_RESET_AND_OTP_EXPIRY_MINUTES * 60
+) {
   if (!JWT_SECRET) {
     throw new Error('JWT_SECRET is not configured')
   }
 
   return sign({ ...payload, jti, token_use: RESET_JWT_MARKER }, JWT_SECRET, {
-    expiresIn: PASSWORD_RESET_AND_OTP_EXPIRY_MINUTES * 60,
+    expiresIn: expiresInSeconds,
   })
+}
+
+export function signSetPasswordInviteToken(payload: IPayload, jti: string) {
+  return signPasswordResetToken(
+    payload,
+    jti,
+    SET_PASSWORD_INVITE_EXPIRY_DAYS * 24 * 60 * 60
+  )
 }
 
 export function verifyAccessToken(token: string): IPayload | null {

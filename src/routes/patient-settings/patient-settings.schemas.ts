@@ -48,8 +48,39 @@ export const changePasswordBodySchema = z
 export const deleteAccountBodySchema = z
   .object({
     confirmation: z.literal('DELETE'),
+    stepUpToken: z.string().min(1).optional().openapi({
+      description: 'Step-up token obtained from POST /auth/step-up/verify',
+    }),
   })
   .openapi('DeleteAccountBody')
+
+export const exportDataQuerySchema = z.object({
+  stepUpToken: z.string().min(1).optional().openapi({
+    description: 'Step-up token obtained from POST /auth/step-up/verify',
+  }),
+})
+
+export const authSessionSchema = z
+  .object({
+    id: z.string(),
+    sessionId: z.string(),
+    ip: z.string().nullable(),
+    userAgent: z.string().nullable(),
+    lastSeenAt: z.string(),
+    createdAt: z.string(),
+    isCurrent: z.boolean(),
+  })
+  .openapi('AuthSession')
+
+export const authSessionsListSchema = z
+  .object({
+    sessions: z.array(authSessionSchema),
+  })
+  .openapi('AuthSessionsList')
+
+export const sessionIdParamSchema = z.object({
+  sessionId: z.string().min(1),
+})
 
 export const patientDataExportSchema = z
   .object({

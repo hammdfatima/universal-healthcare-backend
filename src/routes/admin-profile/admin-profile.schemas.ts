@@ -1,4 +1,5 @@
 import { z } from '@hono/zod-openapi'
+import { strongPasswordSchema } from '~/lib/password-policy'
 
 export const adminProfileBodySchema = z
   .object({
@@ -23,7 +24,7 @@ export const adminProfileSchema = z
 export const changePasswordBodySchema = z
   .object({
     currentPassword: z.string().min(1).openapi({ example: 'currentpassword' }),
-    newPassword: z.string().min(8).openapi({ example: 'newpassword123' }),
+    newPassword: strongPasswordSchema.openapi({ example: 'Password1!' }),
   })
   .openapi('AdminChangePasswordBody')
 

@@ -1,6 +1,14 @@
 import { USER_ROLES, type UserRole } from '~/config/roles'
 import type { User } from '~/generated/prisma'
 import { OtpPurpose } from '~/generated/prisma'
+import {
+  assertAccountNotLocked,
+  bumpTokenVersion,
+  clearDurableLoginFailures,
+  createAuthSession,
+  createSessionId,
+  recordDurableLoginFailure,
+} from '~/lib/account-security'
 import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import {
   signAccessToken,
@@ -9,7 +17,8 @@ import {
   verifyMfaPendingToken,
   verifyPasswordResetToken,
 } from '~/lib/auth'
-import { sendPasswordResetEmail, sendVerificationEmail } from '~/lib/email'
+import { recordConsents } from '~/lib/consent'
+import { sendPasswordResetEmail, sendSignInAlertEmail, sendVerificationEmail } from '~/lib/email'
 import { HttpError } from '~/lib/error'
 import { assertManagedMemberHasHouseholdAccess } from '~/lib/household-access'
 import {
@@ -26,10 +35,13 @@ import { decryptPhiNullable, encryptPhiRequired } from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 import {
   buildLoginRateLimitKey,
+  checkIpLoginRateLimit,
   checkLoginRateLimit,
   clearLoginFailures,
+  recordIpLoginFailure,
   recordLoginFailure,
 } from '~/lib/rate-limit'
+import { formatClientIpForDisplay } from '~/lib/request-context'
 import type { IPayload } from '~/types'
 
 const GENERIC_RESET_MESSAGE =
@@ -37,6 +49,7 @@ const GENERIC_RESET_MESSAGE =
 
 type SignInContext = {
   ipAddress?: string | null
+  userAgent?: string | null
 }
 
 export type AuthUserResponse = {
@@ -51,6 +64,8 @@ export type AuthUserResponse = {
   mustChangePassword: boolean
   isFamilyMemberAccount: boolean
   mfaEnabled: boolean
+  /** HIPAA §2.5: signals the client to prompt MFA enrollment right after sign-in. */
+  mfaSetupRequired?: boolean
 }
 
 export type SessionIssueResult = {
@@ -80,20 +95,36 @@ function toAuthUser(user: User): AuthUserResponse {
   }
 }
 
-function toTokenPayload(user: User): IPayload {
+function toTokenPayload(user: User, sid?: string): IPayload {
   return {
     user_id: user.id,
     email: user.email,
     role: user.role,
     tokenVersion: user.tokenVersion,
+    ...(sid ? { sid } : {}),
   }
 }
 
-function issueSession(user: User): SessionIssueResult {
+// HIPAA §2.5: every session gets a durable, revocable server-side record.
+async function issueSession(user: User, context?: SignInContext): Promise<SessionIssueResult> {
+  const sessionId = createSessionId()
+
+  await createAuthSession({
+    userId: user.id,
+    sessionId,
+    ip: context?.ipAddress,
+    userAgent: context?.userAgent,
+  })
+
+  const token = signAccessToken(toTokenPayload(user, sessionId))
+
   return {
     mfaRequired: false,
-    token: signAccessToken(toTokenPayload(user)),
-    user: toAuthUser(user),
+    token,
+    user: {
+      ...toAuthUser(user),
+      mfaSetupRequired: !user.mfaEnabled,
+    },
   }
 }
 
@@ -136,9 +167,28 @@ async function recordSuccessfulSignIn(user: User, context?: SignInContext) {
   } catch (error) {
     console.error('[auth] Failed to record sign-in notification:', error)
   }
+
+  try {
+    const frontendUrl = (Bun.env.FRONTEND_URL ?? 'http://localhost:3000').replace(/\/$/, '')
+    await sendSignInAlertEmail(user.email, {
+      time: formattedTime,
+      ip: formatClientIpForDisplay(context?.ipAddress),
+      revokeUrl: `${frontendUrl}/patient/settings?tab=account`,
+    })
+  } catch (error) {
+    console.error('[auth] Failed to send sign-in alert email:', error)
+  }
 }
 
 function assertLoginRateLimit(email: string, context?: SignInContext) {
+  const ipLimit = checkIpLoginRateLimit(context?.ipAddress)
+  if (!ipLimit.allowed) {
+    throw new HttpError(
+      `Too many login attempts from this network. Try again in ${ipLimit.retryAfterSeconds} seconds.`,
+      429
+    )
+  }
+
   const key = buildLoginRateLimitKey(email, context?.ipAddress)
   const limit = checkLoginRateLimit(key)
   if (!limit.allowed) {
@@ -210,12 +260,15 @@ export async function signupUser(input: {
   lastName: string
   email: string
   password: string
+  ip?: string | null
+  userAgent?: string | null
 }) {
   const email = input.email.toLowerCase().trim()
   const existingUser = await prisma.user.findUnique({ where: { email } })
 
   if (existingUser) {
-    throw new HttpError('An account with this email already exists.', 409)
+    // Do not leak account existence; the handler always returns a generic message.
+    return
   }
 
   const passwordHash = await hashPassword(input.password)
@@ -239,10 +292,16 @@ export async function signupUser(input: {
     resourceId: user.id,
   })
 
+  // HIPAA §6.4: capture Terms of Use / Privacy / Emergency Access / NPP consent at signup.
+  await recordConsents({
+    userId: user.id,
+    types: ['TERMS_OF_USE', 'PRIVACY_POLICY', 'EMERGENCY_ACCESS', 'NOTICE_OF_PRIVACY_PRACTICES'],
+    ip: input.ip,
+    userAgent: input.userAgent,
+  })
+
   const code = await createOtp(user.id, OtpPurpose.EMAIL_VERIFICATION)
   await sendVerificationEmail(email, code)
-
-  return user
 }
 
 export async function loginUser(
@@ -254,13 +313,21 @@ export async function loginUser(
   const rateKey = assertLoginRateLimit(normalizedEmail, context)
   const user = await prisma.user.findUnique({ where: { email: normalizedEmail } })
 
+  if (user) {
+    // HIPAA §1.3: durable, DB-backed lockout survives process restarts.
+    await assertAccountNotLocked(user.id)
+  }
+
   if (!user || !(await verifyPassword(password, user.password))) {
     recordLoginFailure(rateKey)
+    recordIpLoginFailure(context?.ipAddress)
+    await recordDurableLoginFailure({ userId: user?.id, ip: context?.ipAddress })
     await writeAuditLog({
       action: AUDIT_ACTIONS.LOGIN_FAILURE,
+      actorUserId: user?.id ?? null,
       resourceType: 'Auth',
       ip: context?.ipAddress,
-      metadata: { email: normalizedEmail },
+      metadata: { reason: 'invalid_credentials' },
     })
     throw new HttpError('Invalid email or password.', 401)
   }
@@ -285,6 +352,7 @@ export async function loginUser(
   }
 
   clearLoginFailures(rateKey)
+  await clearDurableLoginFailures(user.id)
   await recordSuccessfulSignIn(user, context)
   await writeAuditLog({
     action: AUDIT_ACTIONS.LOGIN_SUCCESS,
@@ -295,7 +363,7 @@ export async function loginUser(
     ip: context?.ipAddress,
   })
 
-  return issueSession(user)
+  return issueSession(user, context)
 }
 
 export async function verifyMfaLogin(
@@ -315,6 +383,8 @@ export async function verifyMfaLogin(
     throw new HttpError('MFA is not enabled for this account.', 400)
   }
 
+  await assertAccountNotLocked(user.id)
+
   if (user.isBlocked) {
     throw new HttpError('Your account has been blocked. Please contact support.', 403)
   }
@@ -326,17 +396,21 @@ export async function verifyMfaLogin(
   const secret = decryptMfaSecret(user.mfaSecret)
   if (!secret || !verifyTotpCode(secret, code)) {
     recordLoginFailure(rateKey)
+    recordIpLoginFailure(context?.ipAddress)
+    await recordDurableLoginFailure({ userId: user.id, ip: context?.ipAddress })
     await writeAuditLog({
-      action: AUDIT_ACTIONS.LOGIN_FAILURE,
+      action: AUDIT_ACTIONS.MFA_CHALLENGE_FAILED,
       actorUserId: user.id,
+      actorRole: user.role,
       resourceType: 'Auth',
+      resourceId: user.id,
       ip: context?.ipAddress,
-      metadata: { reason: 'mfa_invalid' },
     })
     throw new HttpError('Invalid authenticator code.', 401)
   }
 
   clearLoginFailures(rateKey)
+  await clearDurableLoginFailures(user.id)
   await recordSuccessfulSignIn(user, context)
   await writeAuditLog({
     action: AUDIT_ACTIONS.LOGIN_SUCCESS,
@@ -348,11 +422,12 @@ export async function verifyMfaLogin(
     metadata: { mfa: true },
   })
 
-  return issueSession(user)
+  return issueSession(user, context)
 }
 
 export async function verifyEmail(email: string, otp: string, context?: SignInContext) {
-  const user = await consumeValidOtp(email.toLowerCase().trim(), otp, OtpPurpose.EMAIL_VERIFICATION)
+  const normalizedEmail = email.toLowerCase().trim()
+  const user = await consumeValidOtp(normalizedEmail, otp, OtpPurpose.EMAIL_VERIFICATION)
 
   if (!user) {
     throw new HttpError('Invalid or expired verification code.', 400)
@@ -367,9 +442,11 @@ export async function verifyEmail(email: string, otp: string, context?: SignInCo
     data: { emailVerified: true },
   })
 
+  clearLoginFailures(buildLoginRateLimitKey(normalizedEmail, context?.ipAddress))
+  await clearDurableLoginFailures(verifiedUser.id)
   await recordSuccessfulSignIn(verifiedUser, context)
 
-  return issueSession(verifiedUser)
+  return issueSession(verifiedUser, context)
 }
 
 export async function resendVerification(email: string) {
@@ -384,9 +461,17 @@ export async function resendVerification(email: string) {
   await sendVerificationEmail(normalizedEmail, code)
 }
 
-export async function forgotPassword(email: string) {
+export async function forgotPassword(email: string, context?: SignInContext) {
   const normalizedEmail = email.toLowerCase().trim()
   const user = await prisma.user.findUnique({ where: { email: normalizedEmail } })
+
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PASSWORD_RESET_REQUESTED,
+    actorUserId: user?.id ?? null,
+    resourceType: 'Auth',
+    resourceId: user?.id ?? null,
+    ip: context?.ipAddress,
+  })
 
   if (!user) {
     return
@@ -450,6 +535,90 @@ export async function resetPassword(token: string, password: string) {
       data: { usedAt: new Date() },
     }),
   ])
+
+  // HIPAA §2.5: a password reset invalidates every existing session/token.
+  await bumpTokenVersion(payload.user_id)
+
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PASSWORD_RESET_COMPLETED,
+    actorUserId: payload.user_id,
+    resourceType: 'Auth',
+    resourceId: payload.user_id,
+  })
+}
+
+/**
+ * Invite / welcome set-password: consume the emailed token, set the password,
+ * and issue a session so the member is signed in immediately.
+ */
+export async function setPasswordAndLogin(
+  token: string,
+  password: string,
+  context?: SignInContext
+): Promise<SessionIssueResult> {
+  const payload = verifyPasswordResetToken(token)
+
+  if (!payload) {
+    throw new HttpError('Invalid or expired set-password link.', 400)
+  }
+
+  const resetRecord = await prisma.passwordResetToken.findUnique({
+    where: { id: payload.jti },
+  })
+
+  if (
+    !resetRecord ||
+    resetRecord.userId !== payload.user_id ||
+    resetRecord.usedAt ||
+    resetRecord.expiresAt <= new Date()
+  ) {
+    throw new HttpError('Invalid or expired set-password link.', 400)
+  }
+
+  const passwordHash = await hashPassword(password)
+
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: payload.user_id },
+      data: {
+        password: passwordHash,
+        mustChangePassword: false,
+      },
+    }),
+    prisma.passwordResetToken.update({
+      where: { id: resetRecord.id },
+      data: { usedAt: new Date() },
+    }),
+  ])
+
+  await bumpTokenVersion(payload.user_id)
+
+  const user = await prisma.user.findUnique({ where: { id: payload.user_id } })
+  if (!user) {
+    throw new HttpError('User not found.', 404)
+  }
+
+  if (user.isBlocked) {
+    throw new HttpError('Your account has been blocked. Please contact support.', 403)
+  }
+
+  if (user.managedByOwnerId) {
+    await assertManagedMemberHasHouseholdAccess(user.id)
+  }
+
+  const session = await issueSession(user, context)
+
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.PASSWORD_RESET_COMPLETED,
+    actorUserId: user.id,
+    resourceType: 'Auth',
+    resourceId: user.id,
+    metadata: { flow: 'set_password_invite' },
+  })
+
+  await recordSuccessfulSignIn(user, context)
+
+  return session
 }
 
 export async function getMfaStatus(userId: string) {
@@ -480,6 +649,14 @@ export async function setupMfa(userId: string) {
     },
   })
 
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.MFA_SETUP,
+    actorUserId: userId,
+    actorRole: user.role,
+    resourceType: 'Auth',
+    resourceId: userId,
+  })
+
   return {
     secret,
     otpauthUrl: buildOtpAuthUrl(user.email, secret),
@@ -506,6 +683,14 @@ export async function enableMfa(userId: string, code: string) {
     data: { mfaEnabled: true },
   })
 
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.MFA_ENABLE,
+    actorUserId: userId,
+    actorRole: user.role,
+    resourceType: 'Auth',
+    resourceId: userId,
+  })
+
   return { mfaEnabled: true }
 }
 
@@ -530,6 +715,14 @@ export async function disableMfa(userId: string, code: string, password: string)
       mfaEnabled: false,
       mfaSecret: null,
     },
+  })
+
+  await writeAuditLog({
+    action: AUDIT_ACTIONS.MFA_DISABLE,
+    actorUserId: userId,
+    actorRole: user.role,
+    resourceType: 'Auth',
+    resourceId: userId,
   })
 
   return { mfaEnabled: false }

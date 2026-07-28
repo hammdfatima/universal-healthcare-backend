@@ -28,7 +28,10 @@ export interface IPayload {
   email: string
   role: UserRole
   tokenVersion?: number
+  /** Opaque session id for device/session management (HIPAA §2.5) */
+  sid?: string
 }
+
 
 export type HandlerMapFromRoutes<T extends Record<string, RouteConfig>> = {
   [K in keyof T]: AppRouteHandler<T[K]>

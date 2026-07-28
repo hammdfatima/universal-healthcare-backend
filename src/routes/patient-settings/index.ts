@@ -33,5 +33,13 @@ router
     PATIENT_SETTINGS_ROUTES.deleteAccount,
     PATIENT_SETTINGS_ROUTE_HANDLER.deleteAccount
   )
+  .openapi(
+    PATIENT_SETTINGS_ROUTES.listSessions,
+    PATIENT_SETTINGS_ROUTE_HANDLER.listSessions
+  )
+  .openapi(
+    PATIENT_SETTINGS_ROUTES.revokeSession,
+    PATIENT_SETTINGS_ROUTE_HANDLER.revokeSession
+  )
 
 export default router

@@ -4,7 +4,12 @@ import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { deleteCloudinaryFile } from '~/lib/cloudinary'
 import { HttpError } from '~/lib/error'
 import { notifyImagingResultUploaded } from '~/lib/notifications'
-import { decryptPhi, encryptPhiRequired } from '~/lib/phi-crypto'
+import {
+  decryptPhi,
+  decryptPhiToDate,
+  encryptDateToPhi,
+  encryptPhiRequired,
+} from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 import { resolveVaultPatientId } from '~/lib/vault-access'
 
@@ -83,7 +88,7 @@ function toImagingResultResponse(record: ImagingResult) {
     fileName: decryptPhi(record.fileName),
     testType: decryptPhi(record.testType),
     scanType: decryptPhi(record.scanType),
-    scanDate: formatImagingDate(record.scanDate),
+    scanDate: formatImagingDate(decryptPhiToDate(record.scanDate)),
     fileUrl: decryptPhi(record.fileUrl),
     filePublicId: decryptPhi(record.filePublicId),
     fileMimeType: record.fileMimeType,
@@ -145,8 +150,10 @@ export async function listImagingResults(
 
   const imagingResults = await prisma.imagingResult.findMany({
     where: { userId },
-    orderBy: { scanDate: 'desc' },
   })
+  imagingResults.sort(
+    (a, b) => decryptPhiToDate(b.scanDate).getTime() - decryptPhiToDate(a.scanDate).getTime()
+  )
   await writeAuditLog({
     action: AUDIT_ACTIONS.PHI_READ,
     actorUserId,
@@ -171,6 +178,7 @@ export async function createImagingResult(userId: string, input: ImagingResultIn
       fileName: encryptPhiRequired(plaintext.fileName),
       testType: encryptPhiRequired(plaintext.testType),
       scanType: encryptPhiRequired(plaintext.scanType),
+      scanDate: encryptDateToPhi(plaintext.scanDate),
       fileUrl: encryptPhiRequired(plaintext.fileUrl),
       filePublicId: encryptPhiRequired(plaintext.filePublicId),
     },
@@ -211,6 +219,7 @@ export async function updateImagingResult(
       fileName: encryptPhiRequired(plaintext.fileName),
       testType: encryptPhiRequired(plaintext.testType),
       scanType: encryptPhiRequired(plaintext.scanType),
+      scanDate: encryptDateToPhi(plaintext.scanDate),
       fileUrl: encryptPhiRequired(plaintext.fileUrl),
       filePublicId: encryptPhiRequired(plaintext.filePublicId),
     },

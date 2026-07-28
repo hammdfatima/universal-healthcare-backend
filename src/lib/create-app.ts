@@ -16,10 +16,15 @@ export function createRouter() {
       if (result.success) {
         return;
       }
-      console.log(result);
+
+      const isProduction = (Bun.env.NODE_ENV ?? process.env.NODE_ENV) === "production";
 
       return c.json(
-        { success: false, errors: result.error.issues },
+        {
+          success: false,
+          message: "Validation failed",
+          ...(isProduction ? {} : { issues: result.error.issues }),
+        },
         { status: 400 },
       );
     },

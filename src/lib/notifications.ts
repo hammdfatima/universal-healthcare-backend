@@ -1,5 +1,10 @@
 import type { NotificationType } from '~/generated/prisma'
-import { decryptPhi } from '~/lib/phi-crypto'
+import {
+  decryptPhi,
+  decryptPhiToDate,
+  decryptStringArray,
+  encryptPhiRequired,
+} from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 
 type CreateNotificationInput = {
@@ -98,8 +103,8 @@ export function toNotificationResponse(notification: {
   return {
     id: notification.id,
     type: notification.type,
-    title: notification.title,
-    message: notification.message,
+    title: decryptPhi(notification.title),
+    message: decryptPhi(notification.message),
     href: notification.href,
     read: notification.read,
     createdAt: notification.createdAt.toISOString(),
@@ -139,8 +144,8 @@ export async function createNotification(input: CreateNotificationInput) {
     data: {
       userId: input.userId,
       type: input.type,
-      title: input.title,
-      message: input.message,
+      title: encryptPhiRequired(input.title),
+      message: encryptPhiRequired(input.message),
       href: input.href ?? null,
       dedupeKey: input.dedupeKey ?? null,
     },
@@ -165,8 +170,10 @@ export async function syncScheduledNotifications(
   ])
 
   for (const medication of medications) {
-    const startDate = startOfUtcDay(medication.startDate)
-    const endDate = medication.endDate ? startOfUtcDay(medication.endDate) : null
+    const startDate = startOfUtcDay(decryptPhiToDate(medication.startDate))
+    const endDate = medication.endDate
+      ? startOfUtcDay(decryptPhiToDate(medication.endDate))
+      : null
     const isActive =
       startDate <= localClock.localDate && (!endDate || endDate >= localClock.localDate)
 
@@ -174,7 +181,10 @@ export async function syncScheduledNotifications(
       continue
     }
 
-    const doseTimes = resolveDoseTimes(medication.timesPerDay, medication.timesOfDay)
+    const doseTimes = resolveDoseTimes(
+      medication.timesPerDay,
+      decryptStringArray(medication.timesOfDay)
+    )
     const medicineName = decryptPhi(medication.medicineName)
     const dosage = decryptPhi(medication.dosage)
 
@@ -204,7 +214,10 @@ export async function syncScheduledNotifications(
   }
 
   for (const vaccination of vaccinations) {
-    const nextDueDate = addUtcYears(startOfUtcDay(vaccination.vaccinationDate), 1)
+    const nextDueDate = addUtcYears(
+      startOfUtcDay(decryptPhiToDate(vaccination.vaccinationDate)),
+      1
+    )
     const daysUntilDue = daysBetweenUtc(todayUtc, nextDueDate)
 
     if (daysUntilDue < 0) {

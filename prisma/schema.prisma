@@ -98,6 +98,8 @@ model User {
   emailVerified       Boolean  @default(false)
   mfaEnabled          Boolean  @default(false)
   mfaSecret           String?
+  failedLoginAttempts Int      @default(0)
+  lockedUntil         DateTime?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -125,6 +127,9 @@ model User {
   medicalRecordShareWithAll  Boolean               @default(false)
   medicalRecordSharesOwned   MedicalRecordShare[]  @relation("MedicalRecordShareOwner")
   medicalRecordSharesGranted MedicalRecordShare[]  @relation("MedicalRecordShareGrantee")
+  consents                   ConsentRecord[]
+  authSessions               AuthSession[]
+  breachIncidentsCreated     BreachIncident[]      @relation("BreachIncidentCreator")
 }
 
 model EmergencyAccessToken {
@@ -161,6 +166,74 @@ model AuditLog {
   @@index([patientUserId])
   @@index([action])
   @@index([resourceType])
+}
+
+enum ConsentType {
+  TERMS_OF_USE
+  PRIVACY_POLICY
+  EMERGENCY_ACCESS
+  NOTICE_OF_PRIVACY_PRACTICES
+}
+
+model ConsentRecord {
+  id        String      @id @default(cuid())
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      ConsentType
+  version   String
+  ip        String?
+  userAgent String?
+  createdAt DateTime    @default(now())
+
+  @@index([userId, type])
+  @@index([createdAt])
+}
+
+model AuthSession {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId        String    @unique
+  ip               String?
+  userAgent        String?
+  lastSeenAt       DateTime  @default(now())
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([userId, revokedAt])
+}
+
+model RetentionRule {
+  id           String   @id @default(cuid())
+  category     String   @unique
+  retentionDays Int
+  description  String?
+  updatedAt    DateTime @updatedAt
+  createdAt    DateTime @default(now())
+}
+
+enum BreachStatus {
+  open
+  contained
+  closed
+}
+
+model BreachIncident {
+  id                 String       @id @default(cuid())
+  title              String
+  summary            String
+  status             BreachStatus @default(open)
+  affectedCountEst   Int          @default(0)
+  dataCategories     String[]
+  detectedAt         DateTime     @default(now())
+  hipaa60dDeadline   DateTime
+  createdByUserId    String?
+  createdByUser      User?        @relation("BreachIncidentCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  @@index([status, detectedAt])
 }
 
 model UserSubscription {
@@ -351,8 +424,10 @@ model Medication {
   dosage       String
   timesPerDay  Int       @default(1)
   timesOfDay   String[]  @default([])
-  startDate    DateTime
-  endDate      DateTime?
+  /// AES-256-GCM encrypted ISO timestamp (was DateTime).
+  startDate    String
+  /// AES-256-GCM encrypted ISO timestamp (was DateTime).
+  endDate      String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -378,7 +453,8 @@ model HealthHistoryEntry {
   userId        String
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   illnessName   String
-  diagnosisDate DateTime
+  /// AES-256-GCM encrypted ISO timestamp (was DateTime).
+  diagnosisDate String
   prescribedBy  String
   details       String
   createdAt     DateTime @default(now())
@@ -395,7 +471,8 @@ model Vaccination {
   prescribedBy    String
   administeredBy  String
   dosage          String
-  vaccinationDate DateTime
+  /// AES-256-GCM encrypted ISO timestamp (was DateTime).
+  vaccinationDate String
   time            String
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -409,7 +486,8 @@ model LabResult {
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   fileName         String
   testType         String
-  testDate         DateTime
+  /// AES-256-GCM encrypted ISO timestamp (was DateTime).
+  testDate         String
   fileUrl          String
   filePublicId     String
   fileMimeType     String
@@ -427,7 +505,8 @@ model ImagingResult {
   fileName         String
   testType         String
   scanType         String
-  scanDate         DateTime
+  /// AES-256-GCM encrypted ISO timestamp (was DateTime).
+  scanDate         String
   fileUrl          String
   filePublicId     String
   fileMimeType     String

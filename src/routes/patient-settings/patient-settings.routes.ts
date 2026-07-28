@@ -3,11 +3,14 @@ import * as HttpStatusCodes from 'stoker/http-status-codes'
 import { jsonContent, jsonContentRequired } from 'stoker/openapi/helpers'
 import { zodResponseSchema } from '~/lib/zod-helper'
 import {
+  authSessionsListSchema,
   changePasswordBodySchema,
   deleteAccountBodySchema,
+  exportDataQuerySchema,
   messageResponseSchema,
   patientDataExportSchema,
   patientSettingsSchema,
+  sessionIdParamSchema,
   updateAccountSettingsBodySchema,
   updateProfileBodySchema,
 } from '~/routes/patient-settings/patient-settings.schemas'
@@ -106,11 +109,19 @@ export const PATIENT_SETTINGS_ROUTES = {
     tags: ['Patient Settings'],
     path: '/settings/export',
     summary: 'Export patient health data',
+    description: 'Requires a step-up token from POST /auth/step-up/verify (HIPAA §2.4).',
     security: [{ bearerAuth: [] }],
+    request: {
+      query: exportDataQuerySchema,
+    },
     responses: {
       [HttpStatusCodes.OK]: jsonContent(
         zodResponseSchema(patientDataExportSchema),
         'Patient data export'
+      ),
+      [HttpStatusCodes.FORBIDDEN]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Step-up authentication required'
       ),
       [HttpStatusCodes.UNAUTHORIZED]: jsonContent(
         zodResponseSchema(messageResponseSchema),
@@ -124,6 +135,7 @@ export const PATIENT_SETTINGS_ROUTES = {
     tags: ['Patient Settings'],
     path: '/settings/delete-account',
     summary: 'Permanently delete patient account',
+    description: 'Requires a step-up token from POST /auth/step-up/verify (HIPAA §2.4).',
     security: [{ bearerAuth: [] }],
     request: {
       body: jsonContentRequired(deleteAccountBodySchema, 'Delete account confirmation'),
@@ -136,6 +148,53 @@ export const PATIENT_SETTINGS_ROUTES = {
       [HttpStatusCodes.BAD_REQUEST]: jsonContent(
         zodResponseSchema(messageResponseSchema),
         'Invalid confirmation'
+      ),
+      [HttpStatusCodes.FORBIDDEN]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Step-up authentication required'
+      ),
+      [HttpStatusCodes.UNAUTHORIZED]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Unauthorized'
+      ),
+    },
+  }),
+
+  listSessions: createRoute({
+    method: 'get',
+    tags: ['Patient Settings'],
+    path: '/settings/sessions',
+    summary: 'List active sessions for the current account (HIPAA §2.5)',
+    security: [{ bearerAuth: [] }],
+    responses: {
+      [HttpStatusCodes.OK]: jsonContent(
+        zodResponseSchema(authSessionsListSchema),
+        'Active sessions'
+      ),
+      [HttpStatusCodes.UNAUTHORIZED]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Unauthorized'
+      ),
+    },
+  }),
+
+  revokeSession: createRoute({
+    method: 'delete',
+    tags: ['Patient Settings'],
+    path: '/settings/sessions/{sessionId}',
+    summary: 'Revoke an active session',
+    security: [{ bearerAuth: [] }],
+    request: {
+      params: sessionIdParamSchema,
+    },
+    responses: {
+      [HttpStatusCodes.OK]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Session revoked'
+      ),
+      [HttpStatusCodes.NOT_FOUND]: jsonContent(
+        zodResponseSchema(messageResponseSchema),
+        'Session not found'
       ),
       [HttpStatusCodes.UNAUTHORIZED]: jsonContent(
         zodResponseSchema(messageResponseSchema),

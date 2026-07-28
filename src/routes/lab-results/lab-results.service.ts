@@ -4,7 +4,12 @@ import { AUDIT_ACTIONS, writeAuditLog } from '~/lib/audit'
 import { deleteCloudinaryFile } from '~/lib/cloudinary'
 import { HttpError } from '~/lib/error'
 import { notifyLabResultUploaded } from '~/lib/notifications'
-import { decryptPhi, encryptPhiRequired } from '~/lib/phi-crypto'
+import {
+  decryptPhi,
+  decryptPhiToDate,
+  encryptDateToPhi,
+  encryptPhiRequired,
+} from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
 import { resolveVaultPatientId } from '~/lib/vault-access'
 
@@ -81,7 +86,7 @@ function toLabResultResponse(record: LabResult) {
     id: record.id,
     fileName: decryptPhi(record.fileName),
     testType: decryptPhi(record.testType),
-    testDate: formatLabDate(record.testDate),
+    testDate: formatLabDate(decryptPhiToDate(record.testDate)),
     fileUrl: decryptPhi(record.fileUrl),
     filePublicId: decryptPhi(record.filePublicId),
     fileMimeType: record.fileMimeType,
@@ -142,8 +147,10 @@ export async function listLabResults(
 
   const labResults = await prisma.labResult.findMany({
     where: { userId },
-    orderBy: { testDate: 'desc' },
   })
+  labResults.sort(
+    (a, b) => decryptPhiToDate(b.testDate).getTime() - decryptPhiToDate(a.testDate).getTime()
+  )
   await writeAuditLog({
     action: AUDIT_ACTIONS.PHI_READ,
     actorUserId,
@@ -167,6 +174,7 @@ export async function createLabResult(userId: string, input: LabResultInput) {
       ...plaintext,
       fileName: encryptPhiRequired(plaintext.fileName),
       testType: encryptPhiRequired(plaintext.testType),
+      testDate: encryptDateToPhi(plaintext.testDate),
       fileUrl: encryptPhiRequired(plaintext.fileUrl),
       filePublicId: encryptPhiRequired(plaintext.filePublicId),
     },
@@ -202,6 +210,7 @@ export async function updateLabResult(userId: string, labResultId: string, input
       ...plaintext,
       fileName: encryptPhiRequired(plaintext.fileName),
       testType: encryptPhiRequired(plaintext.testType),
+      testDate: encryptDateToPhi(plaintext.testDate),
       fileUrl: encryptPhiRequired(plaintext.fileUrl),
       filePublicId: encryptPhiRequired(plaintext.filePublicId),
     },

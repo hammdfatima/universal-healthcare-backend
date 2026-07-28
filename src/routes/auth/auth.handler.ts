@@ -3,6 +3,8 @@ import { clearAuthCookie, setAuthCookie } from '~/lib/auth-cookie'
 import { HttpError } from '~/lib/error'
 import { decryptPhiNullable } from '~/lib/phi-crypto'
 import prisma from '~/lib/prisma'
+import { extractClientIp } from '~/lib/request-context'
+import { verifyStepUpPassword } from '~/lib/step-up'
 import type { AUTH_ROUTES } from '~/routes/auth/auth.routes'
 import {
   disableMfa,
@@ -13,6 +15,7 @@ import {
   loginUser,
   resendVerification,
   resetPassword,
+  setPasswordAndLogin,
   setupMfa,
   signupUser,
   verifyEmail,
@@ -24,20 +27,24 @@ import type { HandlerMapFromRoutes } from '~/types'
 function getSignInContext(c: {
   req: { header: (name: string) => string | undefined }
 }) {
-  const forwardedFor = c.req.header('x-forwarded-for')
-  const ipAddress =
-    forwardedFor?.split(',')[0]?.trim() ||
-    c.req.header('x-real-ip') ||
-    c.req.header('cf-connecting-ip') ||
-    null
-
-  return { ipAddress }
+  return {
+    ipAddress: extractClientIp((name) => c.req.header(name)),
+    userAgent: c.req.header('user-agent') ?? null,
+  }
 }
 
 export const AUTH_ROUTE_HANDLER: HandlerMapFromRoutes<typeof AUTH_ROUTES> = {
   signup: async c => {
     const body = c.req.valid('json')
-    await signupUser(body)
+    const context = getSignInContext(c)
+    await signupUser({
+      firstName: body.firstName,
+      lastName: body.lastName,
+      email: body.email,
+      password: body.password,
+      ip: context.ipAddress,
+      userAgent: context.userAgent,
+    })
 
     return c.json(
       {
@@ -136,7 +143,7 @@ export const AUTH_ROUTE_HANDLER: HandlerMapFromRoutes<typeof AUTH_ROUTES> = {
 
   forgotPassword: async c => {
     const body = c.req.valid('json')
-    await forgotPassword(body.email)
+    await forgotPassword(body.email, getSignInContext(c))
 
     return c.json(
       {
@@ -171,6 +178,28 @@ export const AUTH_ROUTE_HANDLER: HandlerMapFromRoutes<typeof AUTH_ROUTES> = {
         success: true,
         message: 'Password updated successfully.',
         data: { message: 'Password updated successfully.' },
+      },
+      HttpStatusCodes.OK
+    )
+  },
+
+  setPassword: async c => {
+    const body = c.req.valid('json')
+    const result = await setPasswordAndLogin(
+      body.token,
+      body.password,
+      getSignInContext(c)
+    )
+    setAuthCookie(c, result.token)
+
+    return c.json(
+      {
+        success: true,
+        message: 'Password set successfully.',
+        data: {
+          mfaRequired: false as const,
+          user: result.user,
+        },
       },
       HttpStatusCodes.OK
     )
@@ -218,6 +247,7 @@ export const AUTH_ROUTE_HANDLER: HandlerMapFromRoutes<typeof AUTH_ROUTES> = {
             mustChangePassword: user.mustChangePassword,
             isFamilyMemberAccount: Boolean(user.managedByOwnerId),
             mfaEnabled: user.mfaEnabled,
+            mfaSetupRequired: !user.mfaEnabled,
           },
         },
       },
@@ -290,6 +320,25 @@ export const AUTH_ROUTE_HANDLER: HandlerMapFromRoutes<typeof AUTH_ROUTES> = {
         success: true,
         message: 'Authenticator MFA disabled.',
         data,
+      },
+      HttpStatusCodes.OK
+    )
+  },
+
+  stepUpVerify: async c => {
+    const authUser = c.get('user')
+    if (!authUser) {
+      throw new HttpError('Unauthorized', 401)
+    }
+
+    const body = c.req.valid('json')
+    const stepUpToken = await verifyStepUpPassword(authUser.user_id, body.password)
+
+    return c.json(
+      {
+        success: true,
+        message: 'Step-up verification successful.',
+        data: { stepUpToken },
       },
       HttpStatusCodes.OK
     )
