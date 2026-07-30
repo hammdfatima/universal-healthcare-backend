@@ -1,4 +1,5 @@
 import * as HttpStatusCodes from 'stoker/http-status-codes'
+import { isMfaEnabled } from '~/config/mfa'
 import { clearAuthCookie, setAuthCookie } from '~/lib/auth-cookie'
 import { HttpError } from '~/lib/error'
 import { decryptPhiNullable } from '~/lib/phi-crypto'
@@ -247,7 +248,7 @@ export const AUTH_ROUTE_HANDLER: HandlerMapFromRoutes<typeof AUTH_ROUTES> = {
             mustChangePassword: user.mustChangePassword,
             isFamilyMemberAccount: Boolean(user.managedByOwnerId),
             mfaEnabled: user.mfaEnabled,
-            mfaSetupRequired: !user.mfaEnabled,
+            mfaSetupRequired: isMfaEnabled() && !user.mfaEnabled,
           },
         },
       },

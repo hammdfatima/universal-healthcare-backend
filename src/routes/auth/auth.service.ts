@@ -1,3 +1,4 @@
+import { isMfaEnabled } from '~/config/mfa'
 import { USER_ROLES, type UserRole } from '~/config/roles'
 import type { User } from '~/generated/prisma'
 import { OtpPurpose } from '~/generated/prisma'
@@ -123,7 +124,7 @@ async function issueSession(user: User, context?: SignInContext): Promise<Sessio
     token,
     user: {
       ...toAuthUser(user),
-      mfaSetupRequired: !user.mfaEnabled,
+      mfaSetupRequired: isMfaEnabled() && !user.mfaEnabled,
     },
   }
 }
@@ -344,7 +345,7 @@ export async function loginUser(
     await assertManagedMemberHasHouseholdAccess(user.id)
   }
 
-  if (user.mfaEnabled && user.mfaSecret) {
+  if (isMfaEnabled() && user.mfaEnabled && user.mfaSecret) {
     return {
       mfaRequired: true,
       mfaToken: signMfaPendingToken(toTokenPayload(user)),

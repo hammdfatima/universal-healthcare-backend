@@ -1,6 +1,7 @@
 import { createMiddleware } from 'hono/factory'
 
 import { USER_ROLES } from '~/config/roles'
+import { isMfaEnabled } from '~/config/mfa'
 import { assertSessionActive } from '~/lib/account-security'
 import { verifyAccessToken } from '~/lib/auth'
 import { getAuthTokenFromRequest } from '~/lib/auth-cookie'
@@ -27,6 +28,10 @@ function isMfaSetupExemptPath(path: string) {
 }
 
 async function assertMfaEnrolled(userId: string, path: string) {
+  if (!isMfaEnabled()) {
+    return
+  }
+
   if (isMfaSetupExemptPath(path)) {
     return
   }

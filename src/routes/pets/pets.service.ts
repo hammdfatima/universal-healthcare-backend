@@ -54,6 +54,8 @@ type PetInput = {
   ownerEmail?: string
   veterinaryClinic?: string
   veterinaryPhone?: string
+  emergencyVeterinaryClinic?: string
+  emergencyVeterinaryPhone?: string
   veterinaryRecords?: string
   additionalNotes?: string
   medicalConditions?: PetMedicalConditionItem[]
@@ -154,6 +156,8 @@ function toPetResponse(record: PetWithEmergency) {
     ownerEmail: decryptPhiNullable(record.ownerEmail),
     veterinaryClinic: decryptPhiNullable(record.veterinaryClinic),
     veterinaryPhone: decryptPhiNullable(record.veterinaryPhone),
+    emergencyVeterinaryClinic: decryptPhiNullable(record.emergencyVeterinaryClinic),
+    emergencyVeterinaryPhone: decryptPhiNullable(record.emergencyVeterinaryPhone),
     veterinaryRecords: decryptPhiNullable(record.veterinaryRecords),
     additionalNotes: decryptPhiNullable(record.additionalNotes),
     medicalConditions: decryptJsonList<PetMedicalConditionItem>(
@@ -275,6 +279,12 @@ function toPetWriteData(input: PetInput, emergencyContactFamilyMemberId: string 
     ownerEmail: encryptPhiNullable(emptyToNull(input.ownerEmail)),
     veterinaryClinic: encryptPhiNullable(emptyToNull(input.veterinaryClinic)),
     veterinaryPhone: encryptPhiNullable(emptyToNull(input.veterinaryPhone)),
+    emergencyVeterinaryClinic: encryptPhiNullable(
+      emptyToNull(input.emergencyVeterinaryClinic)
+    ),
+    emergencyVeterinaryPhone: encryptPhiNullable(
+      emptyToNull(input.emergencyVeterinaryPhone)
+    ),
     veterinaryRecords: encryptPhiNullable(emptyToNull(input.veterinaryRecords)),
     additionalNotes: encryptPhiNullable(emptyToNull(input.additionalNotes)),
     medicalConditionsJson: encryptJsonList(input.medicalConditions),

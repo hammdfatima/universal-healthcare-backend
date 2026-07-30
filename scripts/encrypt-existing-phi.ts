@@ -253,6 +253,8 @@ for (const row of pets) {
       ownerEmail: encryptPhiNullable(row.ownerEmail),
       veterinaryClinic: encryptPhiNullable(row.veterinaryClinic),
       veterinaryPhone: encryptPhiNullable(row.veterinaryPhone),
+      emergencyVeterinaryClinic: encryptPhiNullable(row.emergencyVeterinaryClinic),
+      emergencyVeterinaryPhone: encryptPhiNullable(row.emergencyVeterinaryPhone),
       veterinaryRecords: encryptPhiNullable(row.veterinaryRecords),
       additionalNotes: encryptPhiNullable(row.additionalNotes),
       allergiesJson: maybeEncrypt(row.allergiesJson),

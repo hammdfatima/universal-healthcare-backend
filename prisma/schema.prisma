@@ -314,6 +314,8 @@ model Pet {
   ownerEmail                     String?
   veterinaryClinic               String?
   veterinaryPhone                String?
+  emergencyVeterinaryClinic      String?
+  emergencyVeterinaryPhone       String?
   veterinaryRecords              String?
   additionalNotes                String?
   medicalConditionsJson          String                    @default("[]")
