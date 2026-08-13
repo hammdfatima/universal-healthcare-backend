@@ -4,6 +4,7 @@ import { parseENV } from '~/config/env'
 import configureOpenAPI from '~/lib/configure-open-api'
 import { configureCloudinary } from '~/lib/cloudinary'
 import createApp from '~/lib/create-app'
+import prisma from '~/lib/prisma'
 
 await parseENV()
 
@@ -34,6 +35,15 @@ function getAllowedOrigins() {
 const allowedOrigins = getAllowedOrigins()
 
 app.get('/health', c => c.json({ status: 'ok' }))
+
+app.get('/health/ready', async c => {
+  try {
+    await prisma.$queryRaw`SELECT 1`
+    return c.json({ status: 'ok' })
+  } catch {
+    return c.json({ status: 'starting' }, 503)
+  }
+})
 
 app.use(
   '*',
