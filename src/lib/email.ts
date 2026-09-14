@@ -75,11 +75,13 @@ export async function sendEmail({
       throw new Error(`Failed to send email: ${errorBody}`)
     }
 
+    const result = (await response.json()) as { id?: string }
+    console.log(`[email] Sent via Resend to ${to}: ${subject}${result.id ? ` (${result.id})` : ''}`)
     return
   }
 
+  console.warn(`[email] RESEND_API_KEY missing — email not delivered to ${to}: ${subject}`)
   if (SENSITIVE_SUBJECT_PATTERN.test(subject)) {
-    console.log(`[email] To: ${to} Subject: ${subject} (body redacted)`)
     return
   }
 

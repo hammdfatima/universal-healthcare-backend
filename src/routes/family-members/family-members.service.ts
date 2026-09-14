@@ -11,7 +11,12 @@ import { countHouseholdSeats } from '~/lib/household-seats'
 import { hashPassword } from '~/lib/password'
 import { decryptPhiNullable, encryptPhiRequired } from '~/lib/phi-crypto'
 import type { PlanCapabilities } from '~/lib/plan-tier'
-import { getFamilyMemberLimit, supportsFamilyMembers, supportsPets } from '~/lib/plan-tier'
+import {
+  getFamilyMemberLimit,
+  supportsFamilyMembers,
+  supportsPets,
+  toPlanCapabilities,
+} from '~/lib/plan-tier'
 import prisma from '~/lib/prisma'
 import { isSubscriptionActive } from '~/routes/subscriptions/subscriptions.service'
 
@@ -127,10 +132,7 @@ function assertOwnerHasActiveSubscription(
     throw new HttpError('An active subscription is required to manage family members.', 403)
   }
 
-  const capabilities: PlanCapabilities = {
-    memberLimit: subscription.subscriptionPlan.memberLimit,
-    allowsPets: subscription.subscriptionPlan.allowsPets,
-  }
+  const capabilities: PlanCapabilities = toPlanCapabilities(subscription.subscriptionPlan)
 
   return {
     capabilities,

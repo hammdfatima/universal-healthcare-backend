@@ -1,6 +1,6 @@
 import { HttpError } from '~/lib/error'
 import type { PlanCapabilities } from '~/lib/plan-tier'
-import { getFamilyMemberLimit } from '~/lib/plan-tier'
+import { getFamilyMemberLimit, toPlanCapabilities } from '~/lib/plan-tier'
 import prisma from '~/lib/prisma'
 
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set(['active', 'trialing'])
@@ -62,7 +62,7 @@ export async function getOwnerPlanCapabilities(
         select: {
           status: true,
           subscriptionPlan: {
-            select: { memberLimit: true, allowsPets: true },
+            select: { planKind: true, memberLimit: true, petLimit: true, allowsPets: true },
           },
         },
       },
@@ -73,10 +73,7 @@ export async function getOwnerPlanCapabilities(
     return null
   }
 
-  return {
-    memberLimit: owner.subscription.subscriptionPlan.memberLimit,
-    allowsPets: owner.subscription.subscriptionPlan.allowsPets,
-  }
+  return toPlanCapabilities(owner.subscription.subscriptionPlan)
 }
 
 /** @deprecated Use getOwnerPlanCapabilities */
@@ -166,7 +163,7 @@ export async function syncHouseholdAccessAfterPlanChange(ownerId: string) {
           currentPeriodEnd: true,
           cancelAtPeriodEnd: true,
           subscriptionPlan: {
-            select: { memberLimit: true, allowsPets: true },
+            select: { planKind: true, memberLimit: true, petLimit: true, allowsPets: true },
           },
         },
       },
@@ -179,10 +176,7 @@ export async function syncHouseholdAccessAfterPlanChange(ownerId: string) {
 
   const capabilities =
     owner.subscription && isActiveSubscriptionStatus(owner.subscription.status)
-      ? {
-          memberLimit: owner.subscription.subscriptionPlan.memberLimit,
-          allowsPets: owner.subscription.subscriptionPlan.allowsPets,
-        }
+      ? toPlanCapabilities(owner.subscription.subscriptionPlan)
       : null
 
   const links = await prisma.familyMember.findMany({

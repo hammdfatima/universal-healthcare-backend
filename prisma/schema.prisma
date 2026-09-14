@@ -33,6 +33,11 @@ enum BillingCycle {
   yearly
 }
 
+enum PlanKind {
+  human
+  pet
+}
+
 enum SubscriptionStatus {
   active
   cancelled
@@ -62,8 +67,10 @@ model SubscriptionPlan {
   planName          String
   price             String
   billingCycle      BillingCycle       @default(monthly)
+  planKind          PlanKind           @default(human)
   features          String[]
   memberLimit       Int                @default(0)
+  petLimit          Int                @default(0)
   allowsPets        Boolean            @default(false)
   stripeProductId   String?            @unique
   stripePriceId     String?            @unique

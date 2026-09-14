@@ -28,8 +28,10 @@ type PlanRecord = {
   planName: string
   price: string
   billingCycle: 'monthly' | 'yearly'
+  planKind: 'human' | 'pet'
   features: string[]
   memberLimit: number
+  petLimit: number
   allowsPets: boolean
   stripePriceId: string | null
 }
@@ -60,8 +62,10 @@ function toPlanSummary(plan: PlanRecord) {
     planName: plan.planName,
     price: ensureCurrencyPrice(plan.price),
     billingCycle: plan.billingCycle,
+    planKind: plan.planKind,
     features: plan.features,
     memberLimit: plan.memberLimit,
+    petLimit: plan.petLimit,
     allowsPets: plan.allowsPets,
   }
 }
@@ -394,7 +398,14 @@ async function assertBillingAccountOwner(userId: string) {
   return user
 }
 
-export async function createCheckoutSession(userId: string, planId: string) {
+export async function createCheckoutSession(
+  userId: string,
+  planId: string,
+  options?: {
+    successPath?: string
+    cancelPath?: string
+  }
+) {
   const user = await assertBillingAccountOwner(userId)
 
   const plan = await prisma.subscriptionPlan.findUnique({ where: { id: planId } })
@@ -409,12 +420,33 @@ export async function createCheckoutSession(userId: string, planId: string) {
 
   const existing = await getUserSubscriptionRecord(user.id)
 
+  if (existing && isSubscriptionActive(existing.status)) {
+    throw new HttpError(
+      'You already have an active subscription. Use change plan to switch plans.',
+      409
+    )
+  }
+
+  const frontendUrl = getFrontendUrl()
+  const successPath = sanitizeFrontendPath(options?.successPath)
+  const cancelPath = sanitizeFrontendPath(options?.cancelPath)
+
   const session = await createSubscriptionCheckoutSession({
     userId: user.id,
     userEmail: user.email,
     planId: plan.id,
     stripePriceId: plan.stripePriceId,
     stripeCustomerId: existing?.stripeCustomerId,
+    ...(successPath
+      ? {
+          successUrl: `${frontendUrl}${successPath}${successPath.includes('?') ? '&' : '?'}session_id={CHECKOUT_SESSION_ID}`,
+        }
+      : {}),
+    ...(cancelPath
+      ? {
+          cancelUrl: `${frontendUrl}${cancelPath}${cancelPath.includes('?') ? '&' : '?'}cancelled=true`,
+        }
+      : {}),
   })
 
   if (!session.url) {
@@ -425,6 +457,20 @@ export async function createCheckoutSession(userId: string, planId: string) {
     checkoutUrl: session.url,
     sessionId: session.id,
   }
+}
+
+/** Only allow relative app paths to prevent open redirects. */
+function sanitizeFrontendPath(path?: string) {
+  if (!path) {
+    return null
+  }
+
+  const trimmed = path.trim()
+  if (!trimmed.startsWith('/') || trimmed.startsWith('//') || trimmed.includes('://')) {
+    return null
+  }
+
+  return trimmed
 }
 
 async function upsertSubscriptionFromStripe(

@@ -41,8 +41,11 @@ export const SUBSCRIPTION_ROUTE_HANDLER: HandlerMapFromRoutes<
       throw new HttpError('Unauthorized', 401)
     }
 
-    const { planId } = c.req.valid('json')
-    const session = await createCheckoutSession(authUser.user_id, planId)
+    const { planId, successPath, cancelPath } = c.req.valid('json')
+    const session = await createCheckoutSession(authUser.user_id, planId, {
+      successPath,
+      cancelPath,
+    })
 
     return c.json(
       {

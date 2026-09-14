@@ -7,7 +7,7 @@ import {
   getCoveredMemberUserIdsFromLinks,
 } from '~/lib/household-access'
 import { decryptPhiNullable } from '~/lib/phi-crypto'
-import { getFamilyMemberLimit, supportsFamilyMembers } from '~/lib/plan-tier'
+import { getFamilyMemberLimit, supportsFamilyMembers, toPlanCapabilities } from '~/lib/plan-tier'
 import prisma from '~/lib/prisma'
 import { isSubscriptionActive } from '~/routes/subscriptions/subscriptions.service'
 
@@ -18,7 +18,9 @@ type AdminUserRecord = User & {
     status: SubscriptionStatus
     subscriptionPlan: {
       planName: string
+      planKind: 'human' | 'pet'
       memberLimit: number
+      petLimit: number
       allowsPets: boolean
     }
   } | null
@@ -81,9 +83,7 @@ function buildFamilyMemberInfo(user: AdminUserRecord) {
   const hasActiveSubscription = Boolean(
     user.subscription && isSubscriptionActive(user.subscription.status)
   )
-  const capabilities = plan
-    ? { memberLimit: plan.memberLimit, allowsPets: plan.allowsPets }
-    : null
+  const capabilities = plan ? toPlanCapabilities(plan) : null
   const familyMemberLimit = hasActiveSubscription
     ? getFamilyMemberLimit(capabilities)
     : 0
@@ -298,7 +298,12 @@ async function assertUserNotBlockedUncached(
             select: {
               status: true,
               subscriptionPlan: {
-                select: { memberLimit: true, allowsPets: true },
+                select: {
+                  planKind: true,
+                  memberLimit: true,
+                  petLimit: true,
+                  allowsPets: true,
+                },
               },
             },
           },
@@ -334,10 +339,7 @@ async function assertUserNotBlockedUncached(
     const subscription = owner?.subscription
     const capabilities =
       subscription && isSubscriptionActive(subscription.status)
-        ? {
-            memberLimit: subscription.subscriptionPlan.memberLimit,
-            allowsPets: subscription.subscriptionPlan.allowsPets,
-          }
+        ? toPlanCapabilities(subscription.subscriptionPlan)
         : null
     const covered = getCoveredMemberUserIdsFromLinks(
       getFamilyMemberLimit(capabilities),

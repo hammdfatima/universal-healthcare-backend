@@ -1,5 +1,8 @@
 import { z } from '@hono/zod-openapi'
-import { billingCycleSchema } from '~/routes/subscription-plans/subscription-plans.schemas'
+import {
+  billingCycleSchema,
+  planKindSchema,
+} from '~/routes/subscription-plans/subscription-plans.schemas'
 
 export const subscriptionStatusSchema = z.enum([
   'active',
@@ -16,8 +19,10 @@ export const subscriptionPlanSummarySchema = z
     planName: z.string(),
     price: z.string(),
     billingCycle: billingCycleSchema,
+    planKind: planKindSchema,
     features: z.array(z.string()),
     memberLimit: z.number().int(),
+    petLimit: z.number().int(),
     allowsPets: z.boolean(),
   })
   .openapi('SubscriptionPlanSummary')
@@ -44,10 +49,30 @@ export const subscriptionMeSchema = z
 export const checkoutBodySchema = z
   .object({
     planId: z.string().min(1).openapi({ example: 'clx123abc' }),
+    successPath: z
+      .string()
+      .min(1)
+      .optional()
+      .openapi({
+        example: '/patient/pets',
+        description: 'Frontend path to return to after successful checkout',
+      }),
+    cancelPath: z
+      .string()
+      .min(1)
+      .optional()
+      .openapi({
+        example: '/patient/pets',
+        description: 'Frontend path to return to if checkout is cancelled',
+      }),
   })
   .openapi('SubscriptionCheckoutBody')
 
-export const changePlanBodySchema = checkoutBodySchema.openapi('ChangePlanBody')
+export const changePlanBodySchema = z
+  .object({
+    planId: z.string().min(1).openapi({ example: 'clx123abc' }),
+  })
+  .openapi('ChangePlanBody')
 
 export const changeTypeSchema = z.enum([
   'upgrade',

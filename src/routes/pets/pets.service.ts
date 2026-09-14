@@ -12,6 +12,12 @@ import {
   encryptPhiNullable,
   encryptPhiRequired,
 } from '~/lib/phi-crypto'
+import {
+  getPetLimit,
+  supportsPets,
+  toPlanCapabilities,
+  type PlanCapabilities,
+} from '~/lib/plan-tier'
 import prisma from '~/lib/prisma'
 import { isSubscriptionActive } from '~/routes/subscriptions/subscriptions.service'
 
@@ -209,11 +215,46 @@ async function getOwnerWithSubscription(ownerId: string) {
   return owner
 }
 
-function assertOwnerCanManagePets(owner: Awaited<ReturnType<typeof getOwnerWithSubscription>>) {
+function getOwnerPetCapabilities(
+  owner: Awaited<ReturnType<typeof getOwnerWithSubscription>>
+): PlanCapabilities | null {
   const subscription = owner.subscription
 
   if (!subscription || !isSubscriptionActive(subscription.status)) {
-    throw new HttpError('An active subscription is required to manage pets.', 403)
+    return null
+  }
+
+  return toPlanCapabilities(subscription.subscriptionPlan)
+}
+
+function assertOwnerCanManagePets(owner: Awaited<ReturnType<typeof getOwnerWithSubscription>>) {
+  const capabilities = getOwnerPetCapabilities(owner)
+
+  if (!supportsPets(capabilities)) {
+    throw new HttpError(
+      'A pet subscription or active UHC membership is required to manage pets.',
+      403
+    )
+  }
+}
+
+async function assertOwnerCanAddPet(owner: Awaited<ReturnType<typeof getOwnerWithSubscription>>) {
+  assertOwnerCanManagePets(owner)
+
+  const capabilities = getOwnerPetCapabilities(owner)
+  const limit = getPetLimit(capabilities)
+
+  if (!Number.isFinite(limit)) {
+    return
+  }
+
+  const petCount = await prisma.pet.count({ where: { ownerId: owner.id } })
+
+  if (petCount >= limit) {
+    throw new HttpError(
+      `Your plan allows up to ${limit} pet${limit === 1 ? '' : 's'}. Upgrade to add more.`,
+      403
+    )
   }
 }
 
@@ -297,7 +338,21 @@ function toPetWriteData(input: PetInput, emergencyContactFamilyMemberId: string 
 
 export async function listPets(ownerId: string) {
   const owner = await getOwnerWithSubscription(ownerId)
-  assertOwnerCanManagePets(owner)
+  const capabilities = getOwnerPetCapabilities(owner)
+  const hasPetAccess = supportsPets(capabilities)
+  const limit = getPetLimit(capabilities)
+  const finiteLimit = Number.isFinite(limit) ? limit : 0
+
+  if (!hasPetAccess) {
+    return {
+      pets: [],
+      limit: 0,
+      usedSeats: 0,
+      memberCount: 0,
+      pausedPetCount: 0,
+      supportsPets: false,
+    }
+  }
 
   const pets = await prisma.pet.findMany({
     where: { ownerId },
@@ -318,12 +373,15 @@ export async function listPets(ownerId: string) {
     resourceType: 'PetProfile',
   })
 
+  const pausedPetCount =
+    Number.isFinite(limit) && pets.length > limit ? pets.length - limit : 0
+
   return {
     pets: pets.map(toPetResponse),
-    limit: 0,
-    usedSeats: 0,
-    memberCount: 0,
-    pausedPetCount: 0,
+    limit: finiteLimit,
+    usedSeats: Math.min(pets.length, finiteLimit || pets.length),
+    memberCount: pets.length,
+    pausedPetCount,
     supportsPets: true,
   }
 }
@@ -448,7 +506,7 @@ export async function listSharedPets(viewerUserId: string, ownerId: string) {
 
 export async function createPet(ownerId: string, input: PetInput) {
   const owner = await getOwnerWithSubscription(ownerId)
-  assertOwnerCanManagePets(owner)
+  await assertOwnerCanAddPet(owner)
 
   const emergencyContactFamilyMemberId = await assertEmergencyContactBelongsToOwner(
     ownerId,

@@ -454,7 +454,13 @@ export async function resendVerification(email: string) {
   const normalizedEmail = email.toLowerCase().trim()
   const user = await prisma.user.findUnique({ where: { email: normalizedEmail } })
 
-  if (!user || user.emailVerified) {
+  if (!user) {
+    console.log(`[email] resend-verification skipped: no user for ${normalizedEmail}`)
+    return
+  }
+
+  if (user.emailVerified) {
+    console.log(`[email] resend-verification skipped: already verified ${normalizedEmail}`)
     return
   }
 

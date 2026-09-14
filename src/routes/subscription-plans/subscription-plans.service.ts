@@ -1,4 +1,4 @@
-import type { SubscriptionPlan } from '~/generated/prisma'
+import type { PlanKind, SubscriptionPlan } from '~/generated/prisma'
 import { ensureCurrencyPrice } from '~/lib/currency'
 import { HttpError } from '~/lib/error'
 import { syncHouseholdAccessAfterPlanChange } from '~/lib/household-access'
@@ -13,19 +13,27 @@ type SubscriptionPlanInput = {
   planName: string
   price: string
   billingCycle: 'monthly' | 'yearly'
+  planKind: PlanKind
   features: string[]
   memberLimit: number
+  petLimit: number
   allowsPets: boolean
 }
 
 function normalizeInput(input: SubscriptionPlanInput): SubscriptionPlanInput {
+  const planKind = input.planKind
+  const isPetPlan = planKind === 'pet'
+
   return {
     planName: input.planName.trim(),
     price: ensureCurrencyPrice(input.price.trim()),
     billingCycle: input.billingCycle,
+    planKind,
     features: input.features.map(feature => feature.trim()).filter(Boolean),
-    memberLimit: Math.max(0, Math.floor(input.memberLimit)),
-    allowsPets: Boolean(input.allowsPets),
+    memberLimit: isPetPlan ? 0 : Math.max(0, Math.floor(input.memberLimit)),
+    petLimit: isPetPlan ? Math.max(1, Math.floor(input.petLimit)) : 0,
+    // Human memberships always include pets; pet plans always allow pets.
+    allowsPets: planKind === 'human' || isPetPlan ? true : Boolean(input.allowsPets),
   }
 }
 
@@ -35,8 +43,10 @@ function toSubscriptionPlanResponse(plan: SubscriptionPlan) {
     planName: plan.planName,
     price: ensureCurrencyPrice(plan.price),
     billingCycle: plan.billingCycle,
+    planKind: plan.planKind,
     features: plan.features,
     memberLimit: plan.memberLimit,
+    petLimit: plan.petLimit,
     allowsPets: plan.allowsPets,
     createdAt: plan.createdAt.toISOString(),
     updatedAt: plan.updatedAt.toISOString(),
@@ -97,6 +107,8 @@ export async function updateSubscriptionPlan(id: string, input: SubscriptionPlan
 
   const seatConfigChanged =
     existing.memberLimit !== normalized.memberLimit ||
+    existing.petLimit !== normalized.petLimit ||
+    existing.planKind !== normalized.planKind ||
     existing.allowsPets !== normalized.allowsPets
 
   if (seatConfigChanged) {
